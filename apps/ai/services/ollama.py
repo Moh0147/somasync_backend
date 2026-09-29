@@ -17,7 +17,16 @@ class OllamaAIService(AIService):
         self.timeout = timeout if timeout is not None else settings.OLLAMA_TIMEOUT_SECONDS
 
     def generate(self, prompt, *, system=None, timeout=None):
-        payload = {'model': self.model, 'prompt': prompt, 'stream': False}
+        # Keep responses short for the phone-sized explanation card. Without a
+        # generation cap, a local model may spend the whole request timeout
+        # producing an unnecessarily long answer.
+        payload = {
+            'model': self.model,
+            'prompt': prompt,
+            'stream': False,
+            'keep_alive': '10m',
+            'options': {'temperature': 0.2, 'num_predict': 220},
+        }
         if system:
             payload['system'] = system
 

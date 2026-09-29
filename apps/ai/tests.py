@@ -33,7 +33,7 @@ class AIServiceConfigurationTests(TestCase):
         service = OllamaAIService()
         self.assertEqual(service.base_url, 'http://localhost:11434')
         self.assertEqual(service.model, 'qwen2.5:3b')
-        self.assertEqual(service.timeout, 30)
+        self.assertEqual(service.timeout, 90)
 
     def test_explicit_overrides_take_precedence_over_settings(self):
         service = OllamaAIService(base_url='http://custom:9999/', model='llama3', timeout=5)

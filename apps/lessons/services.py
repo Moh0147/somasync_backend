@@ -99,11 +99,19 @@ def submit_section_quiz(student, section, answers_data):
             progress.completed_at = timezone.now()
             next_section = section.lesson.sections.filter(order__gt=section.order).order_by('order').first()
             if next_section is not None:
-                _, created = StudentSectionProgress.objects.get_or_create(
+                next_progress, created = StudentSectionProgress.objects.get_or_create(
                     student=student, section=next_section,
                     defaults={'school': next_section.school, 'status': StudentSectionProgress.Status.AVAILABLE},
                 )
-                next_section_unlocked = created
+                # A previous attempt or an older client may already have
+                # materialized this row as LOCKED. get_or_create() does not
+                # apply defaults to existing rows, so explicitly promote it.
+                if not created and next_progress.status == StudentSectionProgress.Status.LOCKED:
+                    next_progress.status = StudentSectionProgress.Status.AVAILABLE
+                    next_progress.save(update_fields=['status', 'updated_at'])
+                    next_section_unlocked = True
+                else:
+                    next_section_unlocked = created
         else:
             progress.status = StudentSectionProgress.Status.AVAILABLE
         progress.save(update_fields=['status', 'best_score', 'attempts', 'completed_at', 'updated_at'])

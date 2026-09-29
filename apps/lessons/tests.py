@@ -583,6 +583,17 @@ class SectionContentEndpointTests(SectionsTestBase):
 
 
 class SubmitSectionQuizTests(SectionsTestBase):
+    def test_passing_promotes_an_existing_locked_next_section(self):
+        StudentSectionProgress.objects.create(
+            school=self.school_a, student=self.student_a, section_id=self.section2_id,
+            status=StudentSectionProgress.Status.LOCKED,
+        )
+        response = self.submit(self.section1_id, self.correct_option_id)
+        self.assertTrue(response.data['data']['passed'])
+        self.assertTrue(response.data['data']['next_section_unlocked'])
+        next_progress = StudentSectionProgress.objects.get(student=self.student_a, section_id=self.section2_id)
+        self.assertEqual(next_progress.status, StudentSectionProgress.Status.AVAILABLE)
+
     def test_correct_answer_passes_and_unlocks_next_section(self):
         response = self.submit(self.section1_id, self.correct_option_id)
         self.assertEqual(response.status_code, 200)

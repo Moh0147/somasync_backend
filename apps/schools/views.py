@@ -10,7 +10,7 @@ from common.permissions import IsOwnSchool, IsSystemAdmin, is_system_admin
 from common.utils import api_response
 
 from .models import School
-from .serializers import SchoolAdminCreateSerializer, SchoolSerializer
+from .serializers import SchoolAdminCreateSerializer, SchoolSerializer, StudentCreateSerializer, TeacherCreateSerializer
 
 User = get_user_model()
 
@@ -82,3 +82,38 @@ class SchoolViewSet(EnvelopeMixin, viewsets.ModelViewSet):
 
         admins_qs = User.objects.filter(school=school, role=User.Role.ADMIN, admin_scope=User.AdminScope.SCHOOL)
         return api_response(data=UserSerializer(admins_qs, many=True).data)
+
+    def _handle_staff_action(self, request, role, create_serializer_class, role_label):
+        # Shared by teachers()/students() below -- identical shape to
+        # admins() except who's allowed to POST: a school's own SCHOOL
+        # admin may provision teacher/student accounts for their own
+        # school, not just a system admin (unlike creating another admin).
+        school = self.get_object()
+        is_own_school_admin = request.user.role == User.Role.ADMIN and request.user.school_id == school.id
+
+        if request.method == 'POST':
+            if not (is_system_admin(request.user) or is_own_school_admin):
+                raise PermissionDenied(
+                    f"Only a system admin or that school's own admin can create {role_label} accounts.",
+                )
+            serializer = create_serializer_class(data=request.data, context={'school': school})
+            serializer.is_valid(raise_exception=True)
+            user = serializer.save()
+            return api_response(
+                data=UserSerializer(user).data, message=f'{role_label.capitalize()} created',
+                status=status.HTTP_201_CREATED,
+            )
+
+        if not (is_system_admin(request.user) or is_own_school_admin):
+            raise PermissionDenied(f"Only a system admin or that school's own admin may list its {role_label}s.")
+
+        users_qs = User.objects.filter(school=school, role=role)
+        return api_response(data=UserSerializer(users_qs, many=True).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='teachers', permission_classes=[IsAuthenticated])
+    def teachers(self, request, pk=None):
+        return self._handle_staff_action(request, User.Role.TEACHER, TeacherCreateSerializer, 'teacher')
+
+    @action(detail=True, methods=['get', 'post'], url_path='students', permission_classes=[IsAuthenticated])
+    def students(self, request, pk=None):
+        return self._handle_staff_action(request, User.Role.STUDENT, StudentCreateSerializer, 'student')

@@ -21,8 +21,9 @@ from .services import (
 from .serializers import (
     AnswerInputSerializer, MatchingPairSerializer, QuestionOptionSerializer, QuestionSerializer,
     QuizAssignmentSerializer, QuizSerializer, StartAttemptSerializer, StudentQuizAttemptSerializer,
-    SyncAttemptSerializer,
+    SyncAttemptSerializer, SafeQuestionSerializer,
 )
+from .serializers import SafeQuestionSerializer
 
 
 class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
@@ -47,6 +48,9 @@ class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return queryset
         if user.role == 'TEACHER':
             return queryset.filter(Q(status=Quiz.Status.PUBLISHED) | Q(created_by=user))
+        # Students see published quizzes; access to questions/attempts is
+        # checked separately by validate_quiz_for_attempt, which also
+        # verifies class assignment.
         return queryset.filter(status=Quiz.Status.PUBLISHED)
 
     def get_permissions(self):
@@ -134,6 +138,22 @@ class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         quiz.published_at = timezone.now()
         quiz.save(update_fields=['status', 'published_at', 'updated_at'])
         return api_response(data=self.get_serializer(quiz).data, message='Quiz published')
+
+    @action(detail=True, methods=['get'], url_path='student-questions', permission_classes=[IsAuthenticated, IsStudent])
+    def student_questions(self, request, pk=None):
+        """Answer-key-free question payload for an assigned published quiz."""
+        quiz = self.get_object()
+        validate_quiz_for_attempt(quiz.id, request.user)
+        questions = quiz.questions.prefetch_related('options', 'pairs').order_by('order')
+        return api_response(data=SafeQuestionSerializer(questions, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='student-questions', permission_classes=[IsAuthenticated, IsStudent])
+    def student_questions(self, request, pk=None):
+        """Return answer-key-free questions for an assigned published quiz."""
+        quiz = self.get_object()
+        validate_quiz_for_attempt(quiz.id, request.user)
+        questions = quiz.questions.prefetch_related('options', 'pairs').order_by('order')
+        return api_response(data=SafeQuestionSerializer(questions, many=True).data)
 
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
