@@ -27,7 +27,7 @@ from .ocr_service import extract_script, map_answers
 from .serializers import (
     ExamCandidateInputSerializer, ExamCandidateSerializer, ExamQuestionSerializer, ExamResultSerializer,
     ExamScriptSerializer, ExamSerializer, MarkAnswerInputSerializer, MarkingSchemeItemSerializer,
-    StudentExamAnswerSerializer, StudentExamAttemptSerializer,
+    StudentCandidateNumberSerializer, StudentExamAnswerSerializer, StudentExamAttemptSerializer,
 )
 
 User = get_user_model()
@@ -769,6 +769,13 @@ class ExamResultViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
 
     serializer_class = ExamResultSerializer
     permission_classes = [IsAuthenticated, IsStudent]
+
+    @action(detail=False, methods=['get'], url_path='candidate-numbers')
+    def candidate_numbers(self, request):
+        candidates = ExamCandidate.objects.filter(student=request.user).select_related('exam').order_by(
+            '-created_at', 'exam__title',
+        )
+        return api_response(data=StudentCandidateNumberSerializer(candidates, many=True).data)
 
     def get_queryset(self):
         return StudentExamAttempt.objects.filter(

@@ -50,6 +50,17 @@ class ExamCandidateSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class StudentCandidateNumberSerializer(serializers.ModelSerializer):
+    exam_title = serializers.CharField(source='exam.title', read_only=True)
+    exam_date = serializers.DateField(source='exam.exam_date', read_only=True, allow_null=True)
+    academic_year = serializers.IntegerField(source='exam.academic_year', read_only=True)
+
+    class Meta:
+        model = ExamCandidate
+        fields = ['id', 'candidate_number', 'exam_title', 'exam_date', 'academic_year', 'created_at']
+        read_only_fields = fields
+
+
 class ExamCandidateInputSerializer(serializers.Serializer):
     student = serializers.IntegerField()
     candidate_number = serializers.CharField(max_length=20)

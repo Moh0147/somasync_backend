@@ -343,6 +343,37 @@ class QuizPublishingAndAssignmentTests(QuizzesTestBase):
         questions_response = self.client.get(f'/api/quizzes/questions/?quiz={self.quiz_id}')
         self.assertEqual(questions_response.data['data']['count'], 0)
 
+    def test_student_quiz_list_excludes_section_mini_quizzes(self):
+        # Mini-quizzes are exposed through lesson sections, not as normal
+        # quizzes. They have no QuizAssignment and must not be listed here.
+        from apps.lessons.models import Lesson, LessonSection, SectionMiniQuiz
+
+        lesson = Lesson.objects.create(
+            school=self.school_a, subject=self.subject_a, class_level=self.form_2,
+            title='Algebra lesson', created_by=self.teacher_a, status=Lesson.Status.PUBLISHED,
+        )
+        section = LessonSection.objects.create(
+            school=self.school_a, lesson=lesson, title='Introduction', order=1,
+        )
+        mini_quiz = Quiz.objects.create(
+            school=self.school_a, subject=self.subject_a, class_level=self.form_2,
+            title='Introduction - Mini Quiz', created_by=self.teacher_a,
+            status=Quiz.Status.PUBLISHED,
+        )
+        SectionMiniQuiz.objects.create(
+            school=self.school_a, section=section, quiz=mini_quiz, passing_score=70,
+        )
+
+        self.client.post(f'/api/quizzes/{self.quiz_id}/publish/')
+        self.auth('qz_student_a')
+        response = self.client.get('/api/quizzes/')
+
+        self.assertEqual(response.status_code, 200)
+        listed_ids = [item['id'] for item in response.data['data']['results']]
+        self.assertIn(self.quiz_id, listed_ids)
+        self.assertNotIn(mini_quiz.id, listed_ids)
+        self.assertEqual(self.client.get(f'/api/quizzes/{mini_quiz.id}/').status_code, 404)
+
     def test_student_cannot_retrieve_question_directly(self):
         self.client.post(f'/api/quizzes/{self.quiz_id}/publish/')
         question_id = Question.objects.filter(quiz_id=self.quiz_id).first().id

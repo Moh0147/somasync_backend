@@ -255,7 +255,7 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
     section-unlock status themselves.
     """
 
-    queryset = LessonSection.objects.select_related('school', 'lesson').prefetch_related('content_blocks')
+    queryset = LessonSection.objects.select_related('school', 'lesson', 'mini_quiz').prefetch_related('content_blocks')
     serializer_class = LessonSectionSerializer
     success_messages = {'create': 'Section created', 'update': 'Section updated'}
 

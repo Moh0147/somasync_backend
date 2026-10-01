@@ -48,10 +48,11 @@ class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return queryset
         if user.role == 'TEACHER':
             return queryset.filter(Q(status=Quiz.Status.PUBLISHED) | Q(created_by=user))
-        # Students see published quizzes; access to questions/attempts is
-        # checked separately by validate_quiz_for_attempt, which also
-        # verifies class assignment.
-        return queryset.filter(status=Quiz.Status.PUBLISHED)
+        # Students see only published *normal* quizzes. Section mini-quizzes
+        # are embedded in their lesson sections and must not appear in this
+        # list (nor be opened through the normal quiz flow): they use the
+        # lesson's section gating instead of QuizAssignment.
+        return queryset.filter(status=Quiz.Status.PUBLISHED, section_mini_quiz__isnull=True)
 
     def get_permissions(self):
         if self.action == 'create':

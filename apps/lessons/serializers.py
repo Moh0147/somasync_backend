@@ -53,13 +53,25 @@ class LessonAssignmentSerializer(serializers.ModelSerializer):
 # --- mastery-based sections --------------------------------------------
 
 class LessonSectionSerializer(serializers.ModelSerializer):
+    mini_quiz_id = serializers.SerializerMethodField()
+
     class Meta:
         model = LessonSection
-        fields = ['id', 'school', 'lesson', 'title', 'order', 'created_at', 'updated_at']
+        fields = ['id', 'school', 'lesson', 'title', 'order', 'mini_quiz_id', 'created_at', 'updated_at']
         # `school` is always derived from `lesson.school` server-side
         # (LessonSectionViewSet.perform_create), consistent with Question's
         # relationship to its Quiz.
         read_only_fields = ['id', 'school', 'created_at', 'updated_at']
+
+    def validate_title(self, value):
+        title = value.strip()
+        if not title:
+            raise serializers.ValidationError('A section title cannot be blank.')
+        return title
+
+    def get_mini_quiz_id(self, obj):
+        mini_quiz = getattr(obj, 'mini_quiz', None)
+        return mini_quiz.id if mini_quiz else None
 
 
 class SectionContentBlockSerializer(serializers.ModelSerializer):
@@ -117,6 +129,11 @@ class SectionStatusSerializer(serializers.Serializer):
     best_score = serializers.DecimalField(max_digits=5, decimal_places=2, allow_null=True)
     attempts = serializers.IntegerField()
     has_mini_quiz = serializers.SerializerMethodField()
+    mini_quiz_id = serializers.SerializerMethodField()
 
     def get_has_mini_quiz(self, obj):
         return hasattr(obj['section'], 'mini_quiz')
+
+    def get_mini_quiz_id(self, obj):
+        mini_quiz = getattr(obj['section'], 'mini_quiz', None)
+        return mini_quiz.id if mini_quiz else None
