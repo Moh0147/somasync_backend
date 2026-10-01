@@ -25,6 +25,8 @@ class Exam(models.Model):
     description = models.TextField(blank=True)
     academic_year = models.PositiveIntegerField()
     exam_date = models.DateField(null=True, blank=True)
+    total_marks = models.PositiveIntegerField(null=True, blank=True)
+    duration_minutes = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_exams')
     published_at = models.DateTimeField(null=True, blank=True)
@@ -48,6 +50,19 @@ class Exam(models.Model):
         return f'{self.title} ({self.academic_year}) - {self.school.code}'
 
 
+class MarkingSchemeDocument(models.Model):
+    """Original uploaded marking scheme retained for teacher audit."""
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='marking_scheme_documents')
+    file = models.FileField(upload_to='exam_marking_schemes/%Y/%m/')
+    file_name = models.CharField(max_length=255)
+    extracted_text = models.TextField(blank=True)
+    source_type = models.CharField(max_length=20, default='MARKING_SCHEME')
+    status = models.CharField(max_length=20, default='REVIEW_REQUIRED')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+
 class ExamQuestion(models.Model):
     class Type(models.TextChoices):
         OBJECTIVE = 'OBJECTIVE', 'Objective'
@@ -66,7 +81,7 @@ class ExamQuestion(models.Model):
     question_number = models.CharField(max_length=10)
     question_text = models.TextField()
     question_type = models.CharField(max_length=10, choices=Type.choices)
-    max_marks = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    max_marks = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(0.01)])
     learning_objective = models.ForeignKey(
         'academics.LearningObjective', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='exam_questions',
@@ -109,7 +124,7 @@ class MarkingSchemeItem(models.Model):
     exam_question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE, related_name='marking_scheme_items')
     criterion = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    marks = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    marks = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(0.01)])
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -169,6 +184,12 @@ class ExamScript(models.Model):
     incremented `version` rather than overwriting in place — preserves an
     audit trail, which matters for exam integrity."""
 
+    class OCRStatus(models.TextChoices):
+        NOT_STARTED = 'NOT_STARTED', 'Not started'
+        PROCESSING = 'PROCESSING', 'Processing'
+        READY = 'READY', 'Ready for review'
+        FAILED = 'FAILED', 'Failed'
+
     class Status(models.TextChoices):
         UPLOADED = 'UPLOADED', 'Uploaded'
         PROCESSING = 'PROCESSING', 'Processing'
@@ -193,6 +214,9 @@ class ExamScript(models.Model):
     # subjective answers -- lists which question(s) and why, so the
     # teacher knows what to fix or mark manually instead.
     marking_error = models.TextField(blank=True)
+    ocr_status = models.CharField(max_length=15, choices=OCRStatus.choices, default=OCRStatus.NOT_STARTED)
+    extracted_text = models.TextField(blank=True)
+    ocr_error = models.TextField(blank=True)
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='uploaded_exam_scripts',
     )
@@ -275,6 +299,7 @@ class StudentExamAnswer(models.Model):
     is_correct = models.BooleanField(null=True, blank=True)
     ai_marks_awarded = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     ai_feedback = models.TextField(blank=True)
+    ocr_confidence = models.CharField(max_length=10, blank=True)
     teacher_final_marks = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     teacher_comment = models.TextField(blank=True)
     marked_at = models.DateTimeField(null=True, blank=True)

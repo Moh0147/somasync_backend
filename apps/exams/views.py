@@ -1,5 +1,6 @@
 import mimetypes
 import os
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.contrib.auth import get_user_model
@@ -19,9 +20,10 @@ from common.utils import api_response, compute_file_checksum
 from .ai_marking_service import AIServiceError, ExamAIMarkingService
 from .models import (
     ALLOWED_SCRIPT_EXTENSIONS, Exam, ExamCandidate, ExamQuestion, ExamScript, MAX_SCRIPT_SIZE_BYTES,
-    MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
+    MarkingSchemeDocument, MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
 )
 from .services import ExamMarkingService
+from .ocr_service import extract_script, map_answers
 from .serializers import (
     ExamCandidateInputSerializer, ExamCandidateSerializer, ExamQuestionSerializer, ExamResultSerializer,
     ExamScriptSerializer, ExamSerializer, MarkAnswerInputSerializer, MarkingSchemeItemSerializer,
@@ -182,6 +184,108 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             data=ExamCandidateSerializer(candidate).data, message='Candidate registered',
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path='exam-paper/upload')
+    def upload_exam_paper(self, request, pk=None):
+        exam = self.get_object()
+        if exam.status != Exam.Status.DRAFT:
+            raise ValidationError('Exam papers can only be uploaded while the exam is in DRAFT.')
+        uploaded = request.FILES.get('file')
+        if not uploaded:
+            raise ValidationError({'file': 'This field is required.'})
+        try:
+            text, _ = extract_script(uploaded.file)
+        except Exception as exc:
+            raise ValidationError({'file': str(exc)})
+        document = MarkingSchemeDocument.objects.create(
+            exam=exam, file=uploaded, file_name=uploaded.name, extracted_text=text,
+            source_type='EXAM_PAPER', uploaded_by=request.user,
+        )
+        # Only import explicit question headings. This avoids mistaking page
+        # headers, durations, table cells and footer numbers for questions.
+        created = []
+        existing = {q.question_number for q in exam.questions.all()}
+        heading = re.compile(r'(?im)^\s*question\s+(\d+(?:\s*\([a-z]\))?)\s*(?:\((\d+(?:\.\d+)?)\s*marks?\))?\s*$')
+        matches = list(heading.finditer(text))
+        for index, match in enumerate(matches):
+            number = re.sub(r'\s+', '', match.group(1))
+            if number in existing:
+                continue
+            body = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
+            body_lines = [line.strip() for line in body.splitlines() if line.strip()]
+            question_text = next((line for line in body_lines if not re.match(r'^(?:item|point|answer|marks|total for question)', line, re.I)), '')
+            question = ExamQuestion.objects.create(
+                school=exam.school, exam=exam, created_by=exam.created_by,
+                question_number=number, question_text=question_text[:10000] or f'Imported question {number} — review',
+                question_type=ExamQuestion.Type.SUBJECTIVE, max_marks=int(float(match.group(2) or 1)),
+                order=exam.questions.count() + 1,
+            )
+            existing.add(number); created.append(question.id)
+        return api_response(data={'id': document.id, 'file_name': document.file_name, 'extracted_text': text, 'created_question_ids': created}, message='Exam paper extracted. Review imported questions before publishing.', status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='marking-scheme/upload')
+    def upload_marking_scheme(self, request, pk=None):
+        exam = self.get_object()
+        if exam.status != Exam.Status.DRAFT:
+            raise ValidationError('Marking schemes can only be uploaded while the exam is in DRAFT.')
+        uploaded = request.FILES.get('file')
+        if not uploaded:
+            raise ValidationError({'file': 'This field is required.'})
+        try:
+            text, _ = extract_script(uploaded.file)
+        except Exception as exc:
+            raise ValidationError({'file': str(exc)})
+        document = MarkingSchemeDocument.objects.create(
+            exam=exam, file=uploaded, file_name=uploaded.name, extracted_text=text,
+            source_type='MARKING_SCHEME', uploaded_by=request.user,
+        )
+        created_questions, created_items = [], []
+        questions = {q.question_number: q for q in exam.questions.all()}
+        heading = re.compile(r'(?im)^\s*question\s+(\d+(?:\s*\([a-z]\))?)\s*\((\d+(?:\.\d+)?)\s*marks?\)')
+        matches = list(heading.finditer(text))
+        for index, match in enumerate(matches):
+            number = re.sub(r'\s+', '', match.group(1))
+            max_marks = int(float(match.group(2)))
+            question = questions.get(number)
+            if not question:
+                question = ExamQuestion.objects.create(
+                    school=exam.school, exam=exam, created_by=exam.created_by,
+                    question_number=number, question_text=f'Imported question {number} — review question text',
+                    question_type=ExamQuestion.Type.SUBJECTIVE, max_marks=max_marks, order=exam.questions.count() + 1,
+                )
+                questions[number] = question
+                created_questions.append(question.id)
+            elif question.max_marks == 1 and max_marks > 1:
+                question.max_marks = max_marks
+                question.save(update_fields=['max_marks', 'updated_at'])
+            block = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            # Extract numbered marking points whose following numeric line is
+            # the awarded mark. This handles the NEC table layout produced by
+            # PDF text extraction without trusting page/table coordinates.
+            for point_index, line in enumerate(lines):
+                if not re.fullmatch(r'\d+', line):
+                    continue
+                point_lines = []
+                mark = None
+                for candidate in lines[point_index + 1:point_index + 12]:
+                    if re.fullmatch(r'\d+(?:\.\d+)?', candidate):
+                        mark = float(candidate)
+                        break
+                    if re.match(r'^(?:total for question|section|question\s+\d+)', candidate, re.I):
+                        break
+                    point_lines.append(candidate)
+                if not point_lines or mark is None or mark <= 0:
+                    continue
+                criterion = ' '.join(point_lines)
+                if len(criterion) > 1000:
+                    criterion = criterion[:1000]
+                item = MarkingSchemeItem.objects.create(
+                    exam_question=question, criterion=criterion, marks=Decimal(str(mark)),
+                    order=question.marking_scheme_items.count() + 1,
+                )
+                created_items.append(item.id)
+        return api_response(data={'id': document.id, 'file_name': document.file_name, 'extracted_text': text, 'created_question_ids': created_questions, 'created_item_ids': created_items}, message='Marking scheme extracted. Review generated questions and points before publishing.', status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get', 'post'], url_path='scripts')
     def scripts(self, request, pk=None):
@@ -508,6 +612,33 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
             or (user.role == 'ADMIN' and user.school_id == exam.school_id)
             or exam.created_by_id == user.id
         )
+
+    @action(detail=True, methods=['post'], url_path='ocr')
+    def ocr(self, request, pk=None):
+        script = self.get_object()
+        if not self._can_manage(request.user, script):
+            raise PermissionDenied("Only this exam's editor may run OCR.")
+        script.ocr_status = ExamScript.OCRStatus.PROCESSING
+        script.ocr_error = ''
+        script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+        try:
+            text, method = extract_script(script.file.file)
+            mapped = map_answers(text, script.exam.questions.all())
+            attempt = script.candidate.attempt
+            for answer in attempt.answers.all():
+                if answer.exam_question_id in mapped and not answer.recorded_answer:
+                    answer.recorded_answer = mapped[answer.exam_question_id]
+                    answer.ocr_confidence = 'medium' if method == 'OCR' else 'high'
+                    answer.save(update_fields=['recorded_answer', 'ocr_confidence'])
+            script.extracted_text = text
+            script.ocr_status = ExamScript.OCRStatus.READY
+            script.save(update_fields=['extracted_text', 'ocr_status', 'updated_at'])
+        except Exception as exc:
+            script.ocr_status = ExamScript.OCRStatus.FAILED
+            script.ocr_error = str(exc)
+            script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+            raise ValidationError({'ocr': str(exc)})
+        return api_response(data=self.get_serializer(script).data, message='Text extraction complete')
 
     @action(detail=True, methods=['post'], url_path='ai-mark')
     def ai_mark(self, request, pk=None):

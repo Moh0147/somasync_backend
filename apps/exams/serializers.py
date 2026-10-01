@@ -10,7 +10,7 @@ class ExamSerializer(serializers.ModelSerializer):
         model = Exam
         fields = [
             'id', 'school', 'subject', 'class_level', 'title', 'description',
-            'academic_year', 'exam_date', 'status', 'created_by', 'published_at',
+            'academic_year', 'exam_date', 'total_marks', 'duration_minutes', 'status', 'created_by', 'published_at',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'status', 'created_by', 'published_at', 'created_at', 'updated_at']
@@ -62,7 +62,7 @@ class ExamScriptSerializer(serializers.ModelSerializer):
         model = ExamScript
         fields = [
             'id', 'exam', 'candidate', 'student', 'file_reference', 'file_name', 'mime_type',
-            'file_size', 'checksum', 'version', 'status', 'marking_error',
+            'file_size', 'checksum', 'version', 'status', 'marking_error', 'ocr_status', 'extracted_text', 'ocr_error',
             'uploaded_by', 'uploaded_at', 'updated_at',
         ]
         read_only_fields = fields
@@ -79,7 +79,7 @@ class StudentExamAnswerSerializer(serializers.ModelSerializer):
         model = StudentExamAnswer
         fields = [
             'id', 'attempt', 'exam_question', 'recorded_answer', 'is_correct',
-            'ai_marks_awarded', 'ai_feedback', 'teacher_final_marks', 'teacher_comment',
+            'ai_marks_awarded', 'ai_feedback', 'ocr_confidence', 'teacher_final_marks', 'teacher_comment',
             'marked_at', 'created_at',
         ]
         read_only_fields = fields
