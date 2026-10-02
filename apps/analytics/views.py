@@ -302,6 +302,33 @@ def system_users(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
+def system_user_directory(request):
+    """Read-only directory of school-owned accounts for system admins.
+
+    System admin accounts are intentionally excluded from this directory;
+    they are privileged platform operators, not school-managed accounts.
+    """
+    users = User.objects.select_related('school').exclude(
+        role=User.Role.ADMIN, admin_scope=User.AdminScope.SYSTEM,
+    ).order_by('school__name', 'role', 'last_name', 'first_name', 'username')
+    return api_response(data=[{
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'phone_number': user.phone_number,
+        'role': user.role,
+        'admin_scope': user.admin_scope,
+        'school': user.school_id,
+        'school_name': user.school.name if user.school_id else '',
+        'is_active': user.is_active,
+        'date_joined': user.date_joined,
+    } for user in users])
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_usage(request):
     """High-level system-wide activity counts."""
     return api_response(data={

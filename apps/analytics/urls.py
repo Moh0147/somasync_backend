@@ -19,5 +19,6 @@ urlpatterns = [
 
     path('system/schools/', views.system_schools, name='analytics-system-schools'),
     path('system/users/', views.system_users, name='analytics-system-users'),
+    path('system/user-directory/', views.system_user_directory, name='analytics-system-user-directory'),
     path('system/usage/', views.system_usage, name='analytics-system-usage'),
 ]

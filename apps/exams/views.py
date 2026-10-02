@@ -58,7 +58,7 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return [IsAuthenticated(), (IsAdmin | IsTeacher)()]
         if self.action in (
             'update', 'partial_update', 'destroy', 'publish', 'close', 'candidates', 'scripts', 'attempts',
-            'start_marking', 'publish_results',
+            'start_marking', 'publish_results', 'upload_exam_paper', 'upload_marking_scheme',
         ):
             return [IsAuthenticated(), IsOwnerOrSchoolAdmin()]
         return super().get_permissions()
@@ -217,7 +217,7 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             question = ExamQuestion.objects.create(
                 school=exam.school, exam=exam, created_by=exam.created_by,
                 question_number=number, question_text=question_text[:10000] or f'Imported question {number} — review',
-                question_type=ExamQuestion.Type.SUBJECTIVE, max_marks=int(float(match.group(2) or 1)),
+                question_type=ExamQuestion.Type.SUBJECTIVE, max_marks=Decimal(match.group(2) or '1'),
                 order=exam.questions.count() + 1,
             )
             existing.add(number); created.append(question.id)
@@ -245,7 +245,7 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         matches = list(heading.finditer(text))
         for index, match in enumerate(matches):
             number = re.sub(r'\s+', '', match.group(1))
-            max_marks = int(float(match.group(2)))
+            max_marks = Decimal(match.group(2))
             question = questions.get(number)
             if not question:
                 question = ExamQuestion.objects.create(
@@ -734,7 +734,7 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         score = sum((a.teacher_final_marks for a in answers), Decimal('0'))
         percentage = (score / total_marks * 100) if total_marks else Decimal('0')
 
-        attempt.total_marks = total_marks
+        attempt.total_marks = int(total_marks)
         attempt.score = score.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         attempt.percentage = percentage.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         attempt.save(update_fields=['total_marks', 'score', 'percentage', 'updated_at'])
