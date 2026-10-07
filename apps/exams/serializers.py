@@ -10,8 +10,8 @@ class ExamSerializer(serializers.ModelSerializer):
         model = Exam
         fields = [
             'id', 'school', 'subject', 'class_level', 'title', 'description',
-            'academic_year', 'exam_date', 'total_marks', 'duration_minutes', 'status', 'created_by', 'published_at',
-            'created_at', 'updated_at',
+            'academic_year', 'exam_date', 'total_marks', 'duration_minutes', 'status', 'section_settings',
+            'created_by', 'published_at', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'status', 'created_by', 'published_at', 'created_at', 'updated_at']
         extra_kwargs = {'school': {'required': False}}
@@ -35,7 +35,7 @@ class ExamQuestionSerializer(serializers.ModelSerializer):
         model = ExamQuestion
         fields = [
             'id', 'school', 'exam', 'created_by', 'section', 'question_number', 'question_text',
-            'question_type', 'max_marks', 'correct_answer', 'learning_objective', 'order',
+            'question_type', 'max_marks', 'correct_answer', 'is_compulsory', 'learning_objective', 'order',
             'marking_scheme_items', 'created_at', 'updated_at',
         ]
         # `school`/`created_by` are always derived from `exam` — never

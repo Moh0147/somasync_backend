@@ -100,6 +100,21 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             raise ValidationError('Only a DRAFT exam can be deleted.')
         instance.delete()
 
+    @action(detail=True, methods=['patch'], url_path='section-settings', permission_classes=[IsAuthenticated])
+    def set_section_settings(self, request, pk=None):
+        """Update section_settings without requiring DRAFT status — teachers may
+        need to define choice sections after the exam has already been published."""
+        exam = self.get_object()
+        settings_data = request.data.get('section_settings')
+        if not isinstance(settings_data, dict):
+            raise ValidationError({'section_settings': 'Must be a JSON object mapping section name to required answer count.'})
+        for key, value in settings_data.items():
+            if not isinstance(key, str) or not isinstance(value, int) or value < 1:
+                raise ValidationError({'section_settings': f'Each value must be a positive integer (got {key!r}: {value!r}).'})
+        exam.section_settings = settings_data
+        exam.save(update_fields=['section_settings', 'updated_at'])
+        return api_response(data=self.get_serializer(exam).data, message='Section settings updated')
+
     def _validate_publishable(self, exam):
         questions = list(exam.questions.prefetch_related('marking_scheme_items'))
         if not questions:
@@ -457,6 +472,20 @@ class ExamQuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mod
     def _can_edit(self, request, exam_question):
         return IsOwnerOrSchoolAdmin().has_object_permission(request, self, exam_question)
 
+    @action(detail=True, methods=['patch'], url_path='compulsory', permission_classes=[IsAuthenticated])
+    def set_compulsory(self, request, pk=None):
+        """Toggle is_compulsory on a question. Not restricted to DRAFT — teachers
+        may need to mark Section C questions as optional after the exam is published."""
+        question = self.get_object()
+        if not self._can_edit(request, question):
+            raise PermissionDenied("Only this exam's editor may change question settings.")
+        value = request.data.get('is_compulsory')
+        if not isinstance(value, bool):
+            raise ValidationError({'is_compulsory': 'Must be a boolean.'})
+        question.is_compulsory = value
+        question.save(update_fields=['is_compulsory', 'updated_at'])
+        return api_response(data=ExamQuestionSerializer(question).data, message='Question updated')
+
     @action(
         detail=True, methods=['get', 'post', 'delete'], url_path='marking-scheme',
         permission_classes=[IsAuthenticated],
@@ -546,8 +575,8 @@ class StudentExamAnswerViewSet(
             raise PermissionDenied("Only this exam's editor may mark its answers.")
 
         exam = answer.attempt.exam
-        if exam.status != Exam.Status.MARKING:
-            raise ValidationError('Answers can only be marked while the exam is in MARKING status.')
+        if exam.status not in (Exam.Status.MARKING, Exam.Status.RESULTS_PUBLISHED):
+            raise ValidationError('Answers can only be marked while the exam is in MARKING or RESULTS_PUBLISHED status.')
 
         question = answer.exam_question
         serializer = MarkAnswerInputSerializer(data=request.data)
@@ -621,8 +650,20 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script.ocr_status = ExamScript.OCRStatus.PROCESSING
         script.ocr_error = ''
         script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+
+        # Step 1 — extract raw text (hard failure: nothing to do without text).
         try:
             text, method = extract_script(script.file.file)
+        except Exception as exc:
+            script.ocr_status = ExamScript.OCRStatus.FAILED
+            script.ocr_error = str(exc)
+            script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+            raise ValidationError({'ocr': str(exc)})
+
+        # Step 2 — map text to per-question answers (best-effort: a timeout
+        # or AI failure here must not hide the successfully extracted text).
+        mapping_warning = ''
+        try:
             mapped = map_answers(text, script.exam.questions.all())
             attempt = script.candidate.attempt
             for answer in attempt.answers.all():
@@ -630,14 +671,17 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
                     answer.recorded_answer = mapped[answer.exam_question_id]
                     answer.ocr_confidence = 'medium' if method == 'OCR' else 'high'
                     answer.save(update_fields=['recorded_answer', 'ocr_confidence'])
-            script.extracted_text = text
-            script.ocr_status = ExamScript.OCRStatus.READY
-            script.save(update_fields=['extracted_text', 'ocr_status', 'updated_at'])
         except Exception as exc:
-            script.ocr_status = ExamScript.OCRStatus.FAILED
-            script.ocr_error = str(exc)
-            script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
-            raise ValidationError({'ocr': str(exc)})
+            mapping_warning = str(exc)
+
+        script.extracted_text = text
+        script.ocr_status = ExamScript.OCRStatus.READY
+        script.ocr_error = f'Answer mapping partial: {mapping_warning}' if mapping_warning else ''
+        # Reset script status so a previously-FAILED script can proceed
+        # through AI marking again cleanly after re-extraction.
+        if script.status == ExamScript.Status.FAILED:
+            script.status = ExamScript.Status.UPLOADED
+        script.save(update_fields=['extracted_text', 'ocr_status', 'ocr_error', 'status', 'updated_at'])
         return api_response(data=self.get_serializer(script).data, message='Text extraction complete')
 
     @action(detail=True, methods=['post'], url_path='ai-mark')
@@ -645,8 +689,8 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script = self.get_object()
         if not self._can_manage(request.user, script):
             raise PermissionDenied("Only this exam's editor may trigger AI marking.")
-        if script.exam.status != Exam.Status.MARKING:
-            raise ValidationError("AI marking can only run while the exam is in MARKING status.")
+        if script.exam.status not in (Exam.Status.MARKING, Exam.Status.RESULTS_PUBLISHED):
+            raise ValidationError("AI marking can only run while the exam is in MARKING or RESULTS_PUBLISHED status.")
         if script.status not in (ExamScript.Status.UPLOADED, ExamScript.Status.FAILED):
             raise ValidationError(f'AI marking cannot start from status {script.status}.')
 
@@ -692,19 +736,8 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
 
         if script.status not in (ExamScript.Status.MARKED, ExamScript.Status.UPLOADED, ExamScript.Status.FAILED):
             raise ValidationError(
-                'Only a MARKED script (or one marked entirely manually, without ever using AI) '
-                'can be submitted for teacher review.',
+                'Only a MARKED, UPLOADED, or FAILED script can be submitted for teacher review.',
             )
-        if script.status != ExamScript.Status.MARKED:
-            # Skipping ai-mark entirely (never called, or it previously
-            # failed) is fine IF every answer already has a
-            # teacher_final_marks some other way -- deterministic
-            # objective marking, or a teacher marking subjective answers
-            # entirely by hand. AI must never be a hard requirement here.
-            if script.candidate.attempt.answers.filter(teacher_final_marks__isnull=True).exists():
-                raise ValidationError(
-                    'This script has not finished marking (AI or manual) for every question yet.',
-                )
 
         script.status = ExamScript.Status.TEACHER_REVIEW
         script.save(update_fields=['status', 'updated_at'])
@@ -720,6 +753,25 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
 
         attempt = script.candidate.attempt
         answers = list(attempt.answers.select_related('exam_question'))
+        section_rules = script.exam.section_settings or {}
+
+        # Auto-zero questions the student left blank that are either:
+        #   • in a section with a choice rule (e.g. "Section C": 2)
+        #   • individually flagged as non-compulsory
+        auto_zeroed_ids = set()
+        for a in answers:
+            q = a.exam_question
+            in_choice_section = bool(q.section and q.section in section_rules)
+            if (
+                a.teacher_final_marks is None
+                and (in_choice_section or not q.is_compulsory)
+                and not (a.recorded_answer or '').strip()
+            ):
+                a.teacher_final_marks = Decimal('0')
+                a.teacher_comment = 'Not attempted'
+                a.save(update_fields=['teacher_final_marks', 'teacher_comment'])
+                auto_zeroed_ids.add(a.id)
+
         unmarked = [a for a in answers if a.teacher_final_marks is None]
         if unmarked:
             raise ValidationError(
@@ -730,7 +782,9 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script.status = ExamScript.Status.FINALIZED
         script.save(update_fields=['status', 'updated_at'])
 
-        total_marks = sum(a.exam_question.max_marks for a in answers)
+        # Exclude auto-zeroed unanswered choice questions from the denominator
+        # so the percentage is out of the marks actually available to this student.
+        total_marks = sum(a.exam_question.max_marks for a in answers if a.id not in auto_zeroed_ids)
         score = sum((a.teacher_final_marks for a in answers), Decimal('0'))
         percentage = (score / total_marks * 100) if total_marks else Decimal('0')
 

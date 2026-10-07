@@ -28,6 +28,10 @@ class Exam(models.Model):
     total_marks = models.PositiveIntegerField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    # Maps section name → minimum answers required, e.g. {"Section C": 2}.
+    # Questions in a listed section are treated as choice questions — unanswered
+    # ones are auto-zeroed at finalize without blocking the teacher.
+    section_settings = models.JSONField(default=dict, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_exams')
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -91,6 +95,9 @@ class ExamQuestion(models.Model):
     # ExamMarkingService) for deterministic marking. Never populated by
     # OCR/handwriting recognition, and irrelevant for SUBJECTIVE questions.
     correct_answer = models.CharField(max_length=255, blank=True)
+    # False for "choice" questions (e.g. Section C: answer 2 of 3).
+    # Unanswered non-compulsory questions are auto-zeroed at finalize.
+    is_compulsory = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -295,7 +302,7 @@ class StudentExamAnswer(models.Model):
 
     attempt = models.ForeignKey(StudentExamAttempt, on_delete=models.CASCADE, related_name='answers')
     exam_question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE, related_name='student_answers')
-    recorded_answer = models.CharField(max_length=255, blank=True)
+    recorded_answer = models.TextField(blank=True)
     is_correct = models.BooleanField(null=True, blank=True)
     ai_marks_awarded = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     ai_feedback = models.TextField(blank=True)
