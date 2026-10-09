@@ -4,7 +4,9 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.db.models import Max, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -18,12 +20,13 @@ from common.permissions import (
 from common.utils import api_response, compute_file_checksum
 
 from .ai_marking_service import AIServiceError, ExamAIMarkingService
+from .cover_page_service import generate_cover_pages
 from .models import (
-    ALLOWED_SCRIPT_EXTENSIONS, Exam, ExamCandidate, ExamQuestion, ExamScript, MAX_SCRIPT_SIZE_BYTES,
-    MarkingSchemeDocument, MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
+    ALLOWED_SCRIPT_EXTENSIONS, Exam, ExamCandidate, ExamQuestion, ExamScript, ExamScriptPage,
+    MAX_SCRIPT_SIZE_BYTES, MarkingSchemeDocument, MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
 )
 from .services import ExamMarkingService
-from .ocr_service import extract_script, map_answers
+from .ocr_service import extract_pages_as_png, extract_script, map_answers, vision_extract_answers
 from .serializers import (
     ExamCandidateInputSerializer, ExamCandidateSerializer, ExamQuestionSerializer, ExamResultSerializer,
     ExamScriptSerializer, ExamSerializer, MarkAnswerInputSerializer, MarkingSchemeItemSerializer,
@@ -58,7 +61,7 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return [IsAuthenticated(), (IsAdmin | IsTeacher)()]
         if self.action in (
             'update', 'partial_update', 'destroy', 'publish', 'close', 'candidates', 'scripts', 'attempts',
-            'start_marking', 'publish_results', 'upload_exam_paper', 'upload_marking_scheme',
+            'start_marking', 'publish_results', 'bulk_publish_results', 'upload_exam_paper', 'upload_marking_scheme',
         ):
             return [IsAuthenticated(), IsOwnerOrSchoolAdmin()]
         return super().get_permissions()
@@ -130,6 +133,31 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
                 )
         if errors:
             raise ValidationError({'questions': errors})
+
+    @action(detail=True, methods=['get'], url_path='cover-pages')
+    def cover_pages(self, request, pk=None):
+        """Return a printable PDF with one cover page per registered candidate.
+
+        Each page contains the school name, exam details, candidate number
+        (large), student name, and a QR code encoding the candidate_number.
+        The teacher prints the sheet, attaches each page to the matching
+        physical script, then uses the app's camera scanner — which reads the
+        QR code — to auto-identify the candidate without any manual selection.
+
+        Available at any exam status (the teacher may want to print cover pages
+        before the exam sits, not only after it is closed for marking).
+        """
+        exam = self.get_object()
+        candidates = exam.candidates.select_related('student').order_by('candidate_number')
+        if not candidates.exists():
+            raise ValidationError('No candidates registered for this exam yet.')
+
+        pdf_bytes = generate_cover_pages(exam, candidates)
+        safe_title = re.sub(r'[^\w\s-]', '', exam.title).strip().replace(' ', '_')
+        filename = f'{safe_title}_cover_pages.pdf'
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
@@ -367,6 +395,8 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         for exam_question in exam.questions.all():
             StudentExamAnswer.objects.get_or_create(attempt=attempt, exam_question=exam_question)
 
+        _extract_and_save_pages(script)
+
         return api_response(
             data=ExamScriptSerializer(script, context={'request': request}).data,
             message='Script uploaded', status=status.HTTP_201_CREATED,
@@ -379,6 +409,38 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             'answers',
         )
         return api_response(data=StudentExamAttemptSerializer(attempts_qs, many=True).data)
+
+    @action(detail=False, methods=['post'], url_path='bulk-publish-results')
+    def bulk_publish_results(self, request):
+        """Publish results for multiple exams in one action.
+        Body: { "exam_ids": [1, 2, 3] }
+        Only publishes exams owned by this teacher (or visible to school admin).
+        Each exam must have at least one FINALIZED script."""
+        exam_ids = request.data.get('exam_ids', [])
+        if not isinstance(exam_ids, list) or not exam_ids:
+            raise ValidationError({'exam_ids': 'Provide a non-empty list of exam IDs.'})
+
+        accessible = {e.pk: e for e in self.get_queryset().filter(pk__in=exam_ids)}
+        total_published = 0
+        published_exams = []
+
+        for eid in exam_ids:
+            exam = accessible.get(eid)
+            if not exam:
+                continue
+            finalized_scripts = list(exam.scripts.filter(status=ExamScript.Status.FINALIZED))
+            for script in finalized_scripts:
+                script.status = ExamScript.Status.PUBLISHED
+                script.save(update_fields=['status', 'updated_at'])
+            total_published += len(finalized_scripts)
+            exam.status = Exam.Status.RESULTS_PUBLISHED
+            exam.save(update_fields=['status', 'updated_at'])
+            published_exams.append({'exam_id': exam.pk, 'title': exam.title, 'published_count': len(finalized_scripts)})
+
+        return api_response(
+            data={'published_exams': published_exams, 'total_published': total_published},
+            message=f'Published results for {len(published_exams)} exam(s), {total_published} script(s) total.',
+        )
 
     @action(detail=True, methods=['post'], url_path='publish-results')
     def publish_results(self, request, pk=None):
@@ -603,6 +665,27 @@ class StudentExamAnswerViewSet(
         return api_response(data=self.get_serializer(answer).data, message='Answer marked')
 
 
+def _extract_and_save_pages(script: ExamScript) -> None:
+    """Render each page of `script.file` as a PNG and store as ExamScriptPage rows.
+
+    Best-effort: if extraction fails for any reason the upload itself is not
+    rolled back — the teacher still has the original file and can run OCR.
+    Existing pages for this script version are deleted first so re-runs are
+    idempotent."""
+    try:
+        script.file.seek(0)
+        png_list = extract_pages_as_png(script.file)
+    except Exception:
+        return
+
+    ExamScriptPage.objects.filter(script=script).delete()
+    candidate_num = script.candidate.candidate_number.replace('/', '_')
+    for i, png_bytes in enumerate(png_list, start=1):
+        filename = f'{candidate_num}_v{script.version}_p{i}.png'
+        page = ExamScriptPage(script=script, page_number=i)
+        page.image.save(filename, ContentFile(png_bytes), save=True)
+
+
 class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """/api/exams/scripts/ — drives ExamScript through
     UPLOADED → PROCESSING → MARKED → TEACHER_REVIEW → FINALIZED
@@ -647,24 +730,44 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script = self.get_object()
         if not self._can_manage(request.user, script):
             raise PermissionDenied("Only this exam's editor may run OCR.")
+
+        # Backfill pages for scripts uploaded before the page-extraction feature.
+        if not script.pages.exists():
+            _extract_and_save_pages(script)
+
         script.ocr_status = ExamScript.OCRStatus.PROCESSING
         script.ocr_error = ''
         script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
 
-        # Step 1 — extract raw text (hard failure: nothing to do without text).
-        try:
-            text, method = extract_script(script.file.file)
-        except Exception as exc:
-            script.ocr_status = ExamScript.OCRStatus.FAILED
-            script.ocr_error = str(exc)
-            script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
-            raise ValidationError({'ocr': str(exc)})
+        questions = script.exam.questions.all()
 
-        # Step 2 — map text to per-question answers (best-effort: a timeout
-        # or AI failure here must not hide the successfully extracted text).
+        # Step 1a — vision-combined: OCR + mapping in one model call per page.
+        # Avoids mis-attribution caused by question headers appearing out of order.
+        mapped: dict = {}
+        text = ''
+        method = 'OCR'
+        try:
+            mapped = vision_extract_answers(script.file.file, questions)
+        except Exception:
+            pass
+
+        # Step 1b — fallback: classic OCR then separate mapping.
+        if not mapped:
+            try:
+                text, method = extract_script(script.file.file)
+            except Exception as exc:
+                script.ocr_status = ExamScript.OCRStatus.FAILED
+                script.ocr_error = str(exc)
+                script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+                raise ValidationError({'ocr': str(exc)})
+            try:
+                mapped = map_answers(text, questions)
+            except Exception:
+                pass
+
+        # Step 2 — persist mapped answers (best-effort).
         mapping_warning = ''
         try:
-            mapped = map_answers(text, script.exam.questions.all())
             attempt = script.candidate.attempt
             for answer in attempt.answers.all():
                 if answer.exam_question_id in mapped and not answer.recorded_answer:

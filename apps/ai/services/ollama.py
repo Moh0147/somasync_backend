@@ -61,6 +61,52 @@ class OllamaAIService(AIService):
 
         return AIServiceResponse(text=text.strip(), raw=data)
 
+    def generate_with_image(self, prompt: str, image_bytes: bytes, image_mime: str = 'image/png', *, timeout=None) -> str:
+        """Send a prompt + image to an Ollama vision model and return the response text.
+
+        Uses /api/chat with the images field. Requires a vision-capable model
+        (e.g. gemma3:4b, llava). Falls back gracefully — callers should catch
+        AIServiceUnavailableError / AIServiceResponseError.
+        """
+        import base64
+        from django.conf import settings as django_settings
+
+        vision_model = getattr(django_settings, 'OLLAMA_VISION_MODEL', self.model)
+        b64 = base64.b64encode(image_bytes).decode()
+
+        payload = {
+            'model': vision_model,
+            'messages': [{'role': 'user', 'content': prompt, 'images': [b64]}],
+            'stream': False,
+            'options': {'temperature': 0.1, 'num_predict': 2000},
+        }
+
+        try:
+            response = requests.post(
+                f'{self.base_url}/api/chat', json=payload,
+                timeout=timeout if timeout is not None else self.timeout,
+            )
+        except requests.exceptions.Timeout as exc:
+            raise AIServiceUnavailableError('Ollama vision request timed out.') from exc
+        except requests.exceptions.ConnectionError as exc:
+            raise AIServiceUnavailableError('Could not connect to Ollama.') from exc
+
+        if response.status_code != 200:
+            raise AIServiceUnavailableError(f'Ollama vision returned HTTP {response.status_code}.')
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise AIServiceResponseError('Ollama vision response was not valid JSON.') from exc
+
+        if 'error' in data:
+            raise AIServiceResponseError(f'Ollama vision error: {data["error"]}')
+
+        text = data.get('message', {}).get('content', '').strip()
+        if not text:
+            raise AIServiceResponseError('Ollama vision returned no text.')
+        return text
+
     def health_check(self):
         try:
             response = requests.get(f'{self.base_url}/api/tags', timeout=self.timeout)

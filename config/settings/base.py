@@ -219,4 +219,7 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
 OLLAMA_BASE_URL = config('OLLAMA_BASE_URL', default='http://localhost:11434')
 OLLAMA_MODEL = config('OLLAMA_MODEL', default='qwen2.5:3b')
+OLLAMA_VISION_MODEL = config('OLLAMA_VISION_MODEL', default='gemma3:4b')
 OLLAMA_TIMEOUT_SECONDS = config('OLLAMA_TIMEOUT_SECONDS', default=90, cast=int)
+
+OPENAI_API_KEY = config('OPENAI_API_KEY', default='')

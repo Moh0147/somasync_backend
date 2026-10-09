@@ -177,6 +177,13 @@ def exam_script_upload_path(instance, filename):
     return f'exam_scripts/{instance.school_id}/{instance.exam_id}/{instance.candidate_id}/{filename}'
 
 
+def exam_script_page_upload_path(instance, filename):
+    return (
+        f'exam_script_pages/{instance.script.school_id}/'
+        f'{instance.script.exam_id}/{instance.script.candidate_id}/{filename}'
+    )
+
+
 class ExamScript(models.Model):
     """A scanned exam script upload. Stores metadata only — the file
     itself lives in the configured storage backend, never as bytes in
@@ -246,6 +253,28 @@ class ExamScript(models.Model):
 
     def __str__(self):
         return f'{self.candidate.candidate_number} v{self.version} ({self.status})'
+
+
+class ExamScriptPage(models.Model):
+    """One rendered page from an ExamScript file.
+
+    Created automatically when a script is uploaded. Each page is stored as
+    a PNG image so the teacher can view the original handwriting (including
+    diagrams) alongside the OCR-extracted text during marking review."""
+
+    script = models.ForeignKey(ExamScript, on_delete=models.CASCADE, related_name='pages')
+    page_number = models.PositiveIntegerField()
+    image = models.ImageField(upload_to=exam_script_page_upload_path)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['page_number']
+        constraints = [
+            models.UniqueConstraint(fields=['script', 'page_number'], name='unique_page_number_per_script'),
+        ]
+
+    def __str__(self):
+        return f'{self.script} — page {self.page_number}'
 
 
 class StudentExamAttempt(models.Model):

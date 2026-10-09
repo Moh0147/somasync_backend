@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from .models import (
-    Exam, ExamCandidate, ExamQuestion, ExamScript, MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
+    Exam, ExamCandidate, ExamQuestion, ExamScript, ExamScriptPage,
+    MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
 )
 
 
@@ -66,15 +67,31 @@ class ExamCandidateInputSerializer(serializers.Serializer):
     candidate_number = serializers.CharField(max_length=20)
 
 
+class ExamScriptPageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExamScriptPage
+        fields = ['id', 'page_number', 'image_url']
+        read_only_fields = fields
+
+    def get_image_url(self, obj):
+        try:
+            return obj.image.url
+        except ValueError:
+            return obj.image.name
+
+
 class ExamScriptSerializer(serializers.ModelSerializer):
     file_reference = serializers.SerializerMethodField()
+    pages = ExamScriptPageSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExamScript
         fields = [
             'id', 'exam', 'candidate', 'student', 'file_reference', 'file_name', 'mime_type',
             'file_size', 'checksum', 'version', 'status', 'marking_error', 'ocr_status', 'extracted_text', 'ocr_error',
-            'uploaded_by', 'uploaded_at', 'updated_at',
+            'uploaded_by', 'uploaded_at', 'updated_at', 'pages',
         ]
         read_only_fields = fields
 
