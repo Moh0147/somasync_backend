@@ -1,8 +1,9 @@
 from rest_framework import serializers
 
 from .models import (
-    Exam, ExamCandidate, ExamQuestion, ExamScript, ExamScriptPage,
-    MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
+    Exam, ExamCandidate, ExamQuestion, ExamScript, ExamScriptAssignment,
+    ExamScriptPage, MarkingAuditLog, MarkingSchemeItem,
+    StudentExamAnswer, StudentExamAttempt,
 )
 
 
@@ -25,7 +26,7 @@ class ExamSerializer(serializers.ModelSerializer):
 class MarkingSchemeItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarkingSchemeItem
-        fields = ['id', 'criterion', 'description', 'marks', 'order']
+        fields = ['id', 'criterion', 'description', 'marks', 'order', 'marks_source']
         read_only_fields = ['id']
 
 
@@ -84,13 +85,16 @@ class ExamScriptPageSerializer(serializers.ModelSerializer):
 
 class ExamScriptSerializer(serializers.ModelSerializer):
     file_reference = serializers.SerializerMethodField()
+    candidate_number = serializers.CharField(source='candidate.candidate_number', read_only=True)
     pages = ExamScriptPageSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExamScript
         fields = [
-            'id', 'exam', 'candidate', 'student', 'file_reference', 'file_name', 'mime_type',
-            'file_size', 'checksum', 'version', 'status', 'marking_error', 'ocr_status', 'extracted_text', 'ocr_error',
+            'id', 'exam', 'candidate', 'candidate_number', 'student',
+            'file_reference', 'file_name', 'mime_type',
+            'file_size', 'checksum', 'version', 'status', 'marking_error',
+            'ocr_status', 'extracted_text', 'ocr_error',
             'uploaded_by', 'uploaded_at', 'updated_at', 'pages',
         ]
         read_only_fields = fields
@@ -103,10 +107,17 @@ class ExamScriptSerializer(serializers.ModelSerializer):
 
 
 class StudentExamAnswerSerializer(serializers.ModelSerializer):
+    question_number = serializers.CharField(source='exam_question.question_number', read_only=True)
+    question_text = serializers.CharField(source='exam_question.question_text', read_only=True)
+    max_marks = serializers.DecimalField(source='exam_question.max_marks', max_digits=6, decimal_places=2, read_only=True)
+    question_type = serializers.CharField(source='exam_question.question_type', read_only=True)
+
     class Meta:
         model = StudentExamAnswer
         fields = [
-            'id', 'attempt', 'exam_question', 'recorded_answer', 'is_correct',
+            'id', 'attempt', 'exam_question',
+            'question_number', 'question_text', 'max_marks', 'question_type',
+            'recorded_answer', 'is_correct',
             'ai_marks_awarded', 'ai_feedback', 'ocr_confidence', 'teacher_final_marks', 'teacher_comment',
             'marked_at', 'created_at',
         ]
@@ -165,3 +176,48 @@ class StudentExamAttemptSerializer(serializers.ModelSerializer):
             'score', 'total_marks', 'percentage', 'answers', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
+
+
+class ExamScriptAssignmentSerializer(serializers.ModelSerializer):
+    assignee_username = serializers.CharField(source='assignee.username', read_only=True)
+    assignee_full_name = serializers.SerializerMethodField()
+    assigned_by_username = serializers.CharField(source='assigned_by.username', read_only=True)
+
+    class Meta:
+        model = ExamScriptAssignment
+        fields = [
+            'id', 'script', 'assignee', 'assignee_username', 'assignee_full_name',
+            'role', 'assigned_by', 'assigned_by_username', 'assigned_at',
+        ]
+        read_only_fields = fields
+
+    def get_assignee_full_name(self, obj) -> str:
+        return f'{obj.assignee.first_name} {obj.assignee.last_name}'.strip() or obj.assignee.username
+
+
+class MarkingAuditLogSerializer(serializers.ModelSerializer):
+    action_label = serializers.CharField(source='get_action_display', read_only=True)
+    exam_title = serializers.SerializerMethodField()
+    candidate_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MarkingAuditLog
+        fields = [
+            'id', 'exam', 'exam_title', 'script', 'candidate_number',
+            'actor', 'actor_username', 'actor_role',
+            'action', 'action_label', 'detail', 'ip_address', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_exam_title(self, obj) -> str:
+        return obj.exam.title if obj.exam_id else ''
+
+    def get_candidate_number(self, obj) -> str:
+        if obj.script_id:
+            try:
+                return obj.script.candidate.candidate_number
+            except Exception:
+                pass
+        return ''
+
+

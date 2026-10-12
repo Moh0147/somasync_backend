@@ -5,7 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.db.models import Max, Sum
+from django.db.models import Count, Max, Sum
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -15,21 +15,27 @@ from rest_framework.permissions import IsAuthenticated
 
 from common.mixins import EnvelopeMixin, TenantOwnedViewSetMixin
 from common.permissions import (
-    IsAdmin, IsOwnerOrSchoolAdmin, IsStudent, IsTeacher, TenantScopedQuerysetMixin, is_system_admin,
+    IsAdmin, IsOwnerOrSchoolAdmin, IsStudent, IsTeacher, TenantScopedQuerysetMixin,
+    MARKING_OPERATIONAL_ROLES, MARKING_READ_ROLES, is_system_admin,
 )
 from common.utils import api_response, compute_file_checksum
 
 from .ai_marking_service import AIServiceError, ExamAIMarkingService
 from .cover_page_service import generate_cover_pages
+from .mark_sheet_service import generate_mark_sheet
+from .audit import log_marking_action
 from .models import (
-    ALLOWED_SCRIPT_EXTENSIONS, Exam, ExamCandidate, ExamQuestion, ExamScript, ExamScriptPage,
-    MAX_SCRIPT_SIZE_BYTES, MarkingSchemeDocument, MarkingSchemeItem, StudentExamAnswer, StudentExamAttempt,
+    ALLOWED_SCRIPT_EXTENSIONS, Exam, ExamCandidate, ExamQuestion, ExamScript,
+    ExamScriptAssignment, ExamScriptPage, MarkingAuditLog, MAX_SCRIPT_SIZE_BYTES,
+    MarkingSchemeDocument, MarkingSchemeItem, StudentExamAnswer,
+    StudentExamAttempt,
 )
 from .services import ExamMarkingService
 from .ocr_service import extract_pages_as_png, extract_script, map_answers, vision_extract_answers
 from .serializers import (
     ExamCandidateInputSerializer, ExamCandidateSerializer, ExamQuestionSerializer, ExamResultSerializer,
-    ExamScriptSerializer, ExamSerializer, MarkAnswerInputSerializer, MarkingSchemeItemSerializer,
+    ExamScriptAssignmentSerializer, ExamScriptSerializer, ExamSerializer, MarkAnswerInputSerializer,
+    MarkingAuditLogSerializer, MarkingSchemeItemSerializer,
     StudentCandidateNumberSerializer, StudentExamAnswerSerializer, StudentExamAttemptSerializer,
 )
 
@@ -48,20 +54,42 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
     success_messages = {'create': 'Exam created', 'update': 'Exam updated'}
 
     def get_queryset(self):
-        queryset = super().get_queryset()
         user = self.request.user
+        # Cross-school EXAM_MARKING_MANAGER has no school: bypass tenant scoping
+        # BEFORE calling super(), which would otherwise filter school=None → empty.
+        if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
+            return Exam.objects.select_related('school', 'subject', 'class_level', 'created_by')
+        queryset = super().get_queryset()
         if is_system_admin(user) or user.role == 'ADMIN':
             return queryset
         if user.role == 'TEACHER':
             return queryset.filter(created_by=user)
+        if user.role in MARKING_READ_ROLES:
+            qs = queryset.filter(school=user.school)
+            # EXAMINER sees only active-marking-lifecycle exams at their school.
+            if user.role == 'EXAMINER':
+                qs = qs.filter(status__in=[
+                    Exam.Status.MARKING, Exam.Status.REVIEW,
+                    Exam.Status.FINALIZED, Exam.Status.RESULTS_PUBLISHED,
+                ])
+            return qs
         return queryset.none()
 
     def get_permissions(self):
         if self.action == 'create':
             return [IsAuthenticated(), (IsAdmin | IsTeacher)()]
+        if self.action == 'scripts':
+            # GET (list): marking roles can view; queryset scoping enforces isolation.
+            # POST (upload): owner, school admin, OR exam marking manager — checked inline.
+            return [IsAuthenticated()]
+        if self.action == 'start_marking':
+            # EXAM_MARKING_MANAGER may start marking for exams in their school;
+            # full eligibility check is performed inline in the action.
+            return [IsAuthenticated()]
         if self.action in (
-            'update', 'partial_update', 'destroy', 'publish', 'close', 'candidates', 'scripts', 'attempts',
-            'start_marking', 'publish_results', 'bulk_publish_results', 'upload_exam_paper', 'upload_marking_scheme',
+            'update', 'partial_update', 'destroy', 'publish', 'close', 'candidates', 'attempts',
+            'publish_results', 'bulk_publish_results', 'upload_exam_paper', 'upload_marking_scheme',
+            'mark_sheet', 'cover_pages',
         ):
             return [IsAuthenticated(), IsOwnerOrSchoolAdmin()]
         return super().get_permissions()
@@ -103,7 +131,8 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             raise ValidationError('Only a DRAFT exam can be deleted.')
         instance.delete()
 
-    @action(detail=True, methods=['patch'], url_path='section-settings', permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['patch'], url_path='section-settings',
+            permission_classes=[IsAuthenticated, IsOwnerOrSchoolAdmin])
     def set_section_settings(self, request, pk=None):
         """Update section_settings without requiring DRAFT status — teachers may
         need to define choice sections after the exam has already been published."""
@@ -134,26 +163,66 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         if errors:
             raise ValidationError({'questions': errors})
 
+    @action(detail=True, methods=['get'], url_path='mark-sheet')
+    def mark_sheet(self, request, pk=None):
+        """Return a printable PDF mark sheet with one row per candidate.
+
+        Columns: candidate number, name, marks per question (Q1…Qn), total, %.
+        Available from FINALIZED status onwards so all marks are locked in.
+        Also available in MARKING / REVIEW for a partial preview.
+        """
+        exam = self.get_object()
+        allowed = (
+            Exam.Status.MARKING, Exam.Status.REVIEW,
+            Exam.Status.FINALIZED, Exam.Status.RESULTS_PUBLISHED,
+        )
+        if exam.status not in allowed:
+            raise ValidationError('Mark sheet is only available once marking has started.')
+
+        questions = list(
+            exam.questions.prefetch_related('marking_scheme_items').order_by('order', 'question_number')
+        )
+        candidates = list(
+            exam.candidates.select_related('student', 'attempt').order_by('candidate_number')
+        )
+
+        rows = []
+        for cand in candidates:
+            attempt = getattr(cand, 'attempt', None)
+            marks_map = {}
+            if attempt is not None:
+                for ans in attempt.answers.select_related('exam_question').all():
+                    marks_map[ans.exam_question_id] = ans.teacher_final_marks
+
+            rows.append({
+                'candidate_number': cand.candidate_number,
+                'student_name': cand.student.get_full_name() or cand.student.username,
+                'marks': marks_map,
+                'total': attempt.score if attempt else None,
+                'percentage': attempt.percentage if attempt else None,
+            })
+
+        pdf_bytes = generate_mark_sheet(exam, questions, rows)
+        safe_title = re.sub(r'[^\w\s-]', '', exam.title).strip().replace(' ', '_')
+        filename = f'{safe_title}_mark_sheet.pdf'
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
     @action(detail=True, methods=['get'], url_path='cover-pages')
     def cover_pages(self, request, pk=None):
         """Return a printable PDF with one cover page per registered candidate.
 
-        Each page contains the school name, exam details, candidate number
-        (large), student name, and a QR code encoding the candidate_number.
-        The teacher prints the sheet, attaches each page to the matching
-        physical script, then uses the app's camera scanner — which reads the
-        QR code — to auto-identify the candidate without any manual selection.
-
-        Available at any exam status (the teacher may want to print cover pages
-        before the exam sits, not only after it is closed for marking).
+        Each cover page has the candidate number (large) and a QR code
+        encoding the candidate_number, so the camera scanner can auto-detect
+        the candidate when scanning physical scripts after the exam.
         """
         exam = self.get_object()
         candidates = exam.candidates.select_related('student').order_by('candidate_number')
         if not candidates.exists():
-            raise ValidationError('No candidates registered for this exam yet.')
-
+            return api_response(status=400, message='No candidates registered for this exam.')
         pdf_bytes = generate_cover_pages(exam, candidates)
-        safe_title = re.sub(r'[^\w\s-]', '', exam.title).strip().replace(' ', '_')
+        safe_title = re.sub(r'[^\w\s-]', '', exam.title).strip().replace(' ', '_')[:40]
         filename = f'{safe_title}_cover_pages.pdf'
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -182,11 +251,24 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
     @action(detail=True, methods=['post'], url_path='start-marking')
     def start_marking(self, request, pk=None):
         exam = self.get_object()
+        user = request.user
+        can_start = (
+            is_system_admin(user)
+            or (user.role == 'ADMIN' and user.school_id == exam.school_id)
+            or exam.created_by_id == user.id
+            or (
+                user.role == 'EXAM_MARKING_MANAGER'
+                and (not user.school_id or user.school_id == exam.school_id)
+            )
+        )
+        if not can_start:
+            raise PermissionDenied('Only this exam\'s owner, a school admin, or the Marking Manager may start marking.')
         if exam.status != Exam.Status.CLOSED:
             raise ValidationError('Only a CLOSED exam can move to MARKING.')
         exam.status = Exam.Status.MARKING
         exam.save(update_fields=['status', 'updated_at'])
         return api_response(data=self.get_serializer(exam).data, message='Marking started')
+
 
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='candidates')
     def candidates(self, request, pk=None):
@@ -226,6 +308,51 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         return api_response(
             data=ExamCandidateSerializer(candidate).data, message='Candidate registered',
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='bulk-candidates')
+    def bulk_candidates(self, request, pk=None):
+        """Enroll multiple students at once with pre-generated candidate numbers."""
+        exam = self.get_object()
+        entries = request.data.get('candidates', [])
+        if not isinstance(entries, list) or not entries:
+            raise ValidationError({'candidates': 'Provide a non-empty list of {student, candidate_number} objects.'})
+
+        enrolled = []
+        skipped = []
+        errors = []
+        existing_numbers = set(exam.candidates.values_list('candidate_number', flat=True))
+        existing_students = set(exam.candidates.values_list('student_id', flat=True))
+
+        for entry in entries:
+            student_id = entry.get('student')
+            candidate_number = str(entry.get('candidate_number', '')).strip()
+
+            if not student_id or not candidate_number:
+                errors.append(f'Invalid entry: {entry}')
+                continue
+
+            if student_id in existing_students:
+                skipped.append(candidate_number)
+                continue
+            if candidate_number in existing_numbers:
+                errors.append(f'Namba {candidate_number} imetumika tayari.')
+                continue
+
+            try:
+                student = User.objects.get(pk=student_id, role=User.Role.STUDENT, school_id=exam.school_id)
+            except User.DoesNotExist:
+                errors.append(f'Mwanafunzi {student_id} hapatikani.')
+                continue
+
+            ExamCandidate.objects.create(exam=exam, student=student, candidate_number=candidate_number)
+            enrolled.append(candidate_number)
+            existing_numbers.add(candidate_number)
+            existing_students.add(student_id)
+
+        return api_response(
+            data={'enrolled': enrolled, 'skipped': skipped, 'errors': errors},
+            status=status.HTTP_201_CREATED if enrolled else status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=['post'], url_path='exam-paper/upload')
@@ -335,14 +462,28 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         exam = self.get_object()
 
         if request.method == 'GET':
+            scripts_qs = exam.scripts.select_related('candidate', 'student')
             return api_response(
-                data=ExamScriptSerializer(
-                    exam.scripts.select_related('candidate', 'student'), many=True, context={'request': request},
-                ).data,
+                data=ExamScriptSerializer(scripts_qs, many=True, context={'request': request}).data,
             )
 
-        if exam.status != Exam.Status.CLOSED:
-            raise ValidationError('Scripts can only be uploaded once the exam is CLOSED.')
+        user = request.user
+        _is_examiner = user.role == 'EXAMINER'
+        can_upload = (
+            is_system_admin(user)
+            or (user.role == 'ADMIN' and user.school_id == exam.school_id)
+            or exam.created_by_id == user.id
+            or (
+                user.role == 'EXAM_MARKING_MANAGER'
+                and (not user.school_id or user.school_id == exam.school_id)
+            )
+            or (_is_examiner and user.school_id == exam.school_id)
+        )
+        if not can_upload:
+            raise PermissionDenied('Only this exam\'s owner, school admin, Marking Manager, or an Examiner at this school may upload scripts.')
+
+        if exam.status not in (Exam.Status.CLOSED, Exam.Status.MARKING):
+            raise ValidationError('Scripts can only be uploaded once the exam is CLOSED or in MARKING.')
 
         candidate_number = request.data.get('candidate_number')
         if not candidate_number:
@@ -395,6 +536,16 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         for exam_question in exam.questions.all():
             StudentExamAnswer.objects.get_or_create(attempt=attempt, exam_question=exam_question)
 
+        # When an EXAMINER uploads their own script they are automatically
+        # assigned to it so they can immediately proceed to OCR and marking.
+        if _is_examiner:
+            ExamScriptAssignment.objects.get_or_create(
+                script=script,
+                assignee=request.user,
+                role=ExamScriptAssignment.Role.EXAMINER,
+                defaults={'assigned_by': request.user},
+            )
+
         _extract_and_save_pages(script)
 
         return api_response(
@@ -441,6 +592,52 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             data={'published_exams': published_exams, 'total_published': total_published},
             message=f'Published results for {len(published_exams)} exam(s), {total_published} script(s) total.',
         )
+
+    @action(detail=False, methods=['get'], url_path='marking-summary')
+    def marking_summary(self, request):
+        """GET /api/exams/marking-summary/ — per-exam script status counts.
+
+        Intended for EXAM_MARKING_MANAGER dashboards. Returns all exams visible
+        to the calling user that are in an active marking lifecycle phase, with
+        a count breakdown of script statuses. A single aggregation query is used
+        to avoid N+1 loading."""
+        active_statuses = {
+            Exam.Status.MARKING, Exam.Status.REVIEW,
+            Exam.Status.FINALIZED, Exam.Status.RESULTS_PUBLISHED,
+        }
+        exams = (
+            self.get_queryset()
+            .filter(status__in=active_statuses)
+            .prefetch_related('subject', 'scripts')
+            .order_by('-updated_at')
+        )
+
+        # Single aggregation: count scripts grouped by (exam_id, status).
+        from django.db.models import Q
+        script_counts = (
+            ExamScript.objects
+            .filter(exam__in=exams)
+            .values('exam_id', 'status')
+            .annotate(n=Count('id'))
+        )
+        counts_by_exam: dict = {}
+        for row in script_counts:
+            counts_by_exam.setdefault(row['exam_id'], {})[row['status']] = row['n']
+
+        all_statuses = ['UPLOADED', 'PROCESSING', 'MARKED', 'TEACHER_REVIEW', 'FINALIZED', 'PUBLISHED', 'FAILED']
+        result = []
+        for exam in exams:
+            exam_counts = counts_by_exam.get(exam.pk, {})
+            result.append({
+                'exam_id': exam.pk,
+                'title': exam.title,
+                'subject_name': exam.subject.name if exam.subject_id else '',
+                'academic_year': exam.academic_year,
+                'exam_status': exam.status,
+                'total_scripts': sum(exam_counts.values()),
+                'counts': {s: exam_counts.get(s, 0) for s in all_statuses},
+            })
+        return api_response(data=result)
 
     @action(detail=True, methods=['post'], url_path='publish-results')
     def publish_results(self, request, pk=None):
@@ -499,6 +696,12 @@ class ExamQuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mod
     def _require_draft_exam(self, exam):
         if exam.status != Exam.Status.DRAFT:
             raise ValidationError('Exam questions can only be modified while the exam is in DRAFT status.')
+
+    def _require_editable_exam(self, exam):
+        """Wider gate used for marking scheme items — allows editing in MARKING
+        status too (NECTA examiners enter the answer key after the exam is set up)."""
+        if exam.status not in (Exam.Status.DRAFT, Exam.Status.MARKING):
+            raise ValidationError('Marking scheme items can only be edited in DRAFT or MARKING status.')
 
     def _validate_learning_objective(self, exam, learning_objective):
         if learning_objective and learning_objective.topic.subject_id != exam.subject_id:
@@ -562,7 +765,7 @@ class ExamQuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mod
 
         if not self._can_edit(request, exam_question):
             raise PermissionDenied("Only this exam's editor may manage its marking scheme.")
-        self._require_draft_exam(exam_question.exam)
+        self._require_editable_exam(exam_question.exam)
 
         if request.method == 'DELETE':
             item_id = request.data.get('item_id')
@@ -620,15 +823,28 @@ class StudentExamAnswerViewSet(
             return queryset.filter(attempt__school_id=user.school_id)
         if user.role == 'TEACHER':
             return queryset.filter(attempt__exam__created_by=user)
+        if user.role in MARKING_READ_ROLES:
+            if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
+                qs = queryset  # cross-school oversight
+            else:
+                qs = queryset.filter(attempt__school_id=user.school_id)
+            return qs
         return queryset.none()
 
     def _can_mark(self, user, answer):
         exam = answer.attempt.exam
-        return (
-            is_system_admin(user)
-            or (user.role == 'ADMIN' and user.school_id == exam.school_id)
-            or exam.created_by_id == user.id
-        )
+        # System admin explicitly excluded from routine marking ops.
+        if is_system_admin(user):
+            return False
+        if user.role == 'ADMIN' and user.school_id == exam.school_id:
+            return True
+        if user.role == 'TEACHER' and exam.created_by_id == user.id:
+            return True
+        if user.role == 'EXAM_MARKING_MANAGER':
+            return not user.school_id or user.school_id == exam.school_id
+        if user.role == 'EXAMINER' and user.school_id == exam.school_id:
+            return exam.status in ('MARKING', 'REVIEW', 'FINALIZED', 'RESULTS_PUBLISHED')
+        return False
 
     @action(detail=True, methods=['post'])
     def mark(self, request, pk=None):
@@ -650,6 +866,12 @@ class StudentExamAnswerViewSet(
             answer.save(update_fields=['recorded_answer'])
             if question.question_type == ExamQuestion.Type.OBJECTIVE and 'teacher_final_marks' not in data:
                 answer = ExamMarkingService.mark_answer(answer)
+                log_marking_action(
+                    request, MarkingAuditLog.Action.ANSWER_MARKED,
+                    script=answer.attempt.current_script,
+                    detail={'question': question.question_number,
+                            'marks': str(answer.teacher_final_marks), 'method': 'objective'},
+                )
                 return api_response(data=self.get_serializer(answer).data, message='Answer marked')
 
         if 'teacher_final_marks' in data:
@@ -662,6 +884,12 @@ class StudentExamAnswerViewSet(
             answer.marked_at = timezone.now()
             answer.save(update_fields=['teacher_final_marks', 'teacher_comment', 'marked_at'])
 
+        log_marking_action(
+            request, MarkingAuditLog.Action.ANSWER_MARKED,
+            script=answer.attempt.current_script,
+            detail={'question': question.question_number,
+                    'marks': str(answer.teacher_final_marks), 'method': 'manual'},
+        )
         return api_response(data=self.get_serializer(answer).data, message='Answer marked')
 
 
@@ -705,25 +933,55 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
     queryset = ExamScript.objects.select_related('exam', 'candidate', 'student')
     serializer_class = ExamScriptSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None
 
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
         if is_system_admin(user):
-            return queryset
+            return queryset  # read-only oversight; _can_manage blocks state ops
         if user.role == 'ADMIN':
             return queryset.filter(school_id=user.school_id)
         if user.role == 'TEACHER':
             return queryset.filter(exam__created_by=user)
+        if user.role in MARKING_READ_ROLES:
+            if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
+                qs = queryset  # cross-school oversight
+            else:
+                qs = queryset.filter(school_id=user.school_id)
+            # Optional filters — useful for the "My Scripts" list page.
+            exam_id = self.request.query_params.get('exam')
+            status_filter = self.request.query_params.get('status')
+            if exam_id:
+                qs = qs.filter(exam_id=exam_id)
+            if status_filter:
+                qs = qs.filter(status=status_filter)
+            return qs
         return queryset.none()
 
     def _can_manage(self, user, script):
         exam = script.exam
-        return (
-            is_system_admin(user)
-            or (user.role == 'ADMIN' and user.school_id == exam.school_id)
-            or exam.created_by_id == user.id
-        )
+        # System admin: never authorised for routine marking ops.
+        if is_system_admin(user):
+            return False
+        # School admin: fallback oversight when EXAM_MARKING_MANAGER not yet deployed.
+        if user.role == 'ADMIN' and user.admin_scope == 'SCHOOL' and user.school_id == exam.school_id:
+            return True
+        # Teacher who created the exam.
+        if user.role == 'TEACHER' and exam.created_by_id == user.id:
+            return True
+        # EXAM_MARKING_MANAGER: cross-school (null) or school-scoped.
+        if user.role == 'EXAM_MARKING_MANAGER':
+            return not user.school_id or user.school_id == exam.school_id
+        # EXAMINER: any script for a MARKING exam at their school.
+        if user.role == 'EXAMINER':
+            return (
+                user.school_id == exam.school_id
+                and exam.status in (
+                    'MARKING', 'REVIEW', 'FINALIZED', 'RESULTS_PUBLISHED',
+                )
+            )
+        return False
 
     @action(detail=True, methods=['post'], url_path='ocr')
     def ocr(self, request, pk=None):
@@ -785,6 +1043,7 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         if script.status == ExamScript.Status.FAILED:
             script.status = ExamScript.Status.UPLOADED
         script.save(update_fields=['extracted_text', 'ocr_status', 'ocr_error', 'status', 'updated_at'])
+        log_marking_action(request, MarkingAuditLog.Action.SCRIPT_OCR_RAN, script=script)
         return api_response(data=self.get_serializer(script).data, message='Text extraction complete')
 
     @action(detail=True, methods=['post'], url_path='ai-mark')
@@ -792,8 +1051,8 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script = self.get_object()
         if not self._can_manage(request.user, script):
             raise PermissionDenied("Only this exam's editor may trigger AI marking.")
-        if script.exam.status not in (Exam.Status.MARKING, Exam.Status.RESULTS_PUBLISHED):
-            raise ValidationError("AI marking can only run while the exam is in MARKING or RESULTS_PUBLISHED status.")
+        if script.exam.status not in (Exam.Status.CLOSED, Exam.Status.MARKING, Exam.Status.RESULTS_PUBLISHED):
+            raise ValidationError("AI marking can only run while the exam is CLOSED, in MARKING, or RESULTS_PUBLISHED status.")
         if script.status not in (ExamScript.Status.UPLOADED, ExamScript.Status.FAILED):
             raise ValidationError(f'AI marking cannot start from status {script.status}.')
 
@@ -811,7 +1070,7 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         errors = []
         for answer in subjective_answers:
             if not answer.recorded_answer:
-                errors.append(f'Q{answer.exam_question.question_number}: answer not yet transcribed.')
+                # Blank answer — student left it empty or OCR missed it; skip silently.
                 continue
             try:
                 ExamAIMarkingService.mark_answer(answer)
@@ -823,13 +1082,27 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
             script.marking_error = '; '.join(errors)
             script.save(update_fields=['status', 'marking_error', 'updated_at'])
             return api_response(
-                data=self.get_serializer(script).data, message='AI marking failed',
-                status=status.HTTP_400_BAD_REQUEST,
+                data=self.get_serializer(script).data, message='AI marking completed with errors',
             )
 
         script.status = ExamScript.Status.MARKED
-        script.save(update_fields=['status', 'updated_at'])
+        script.marking_error = ''
+        script.save(update_fields=['status', 'marking_error', 'updated_at'])
+        log_marking_action(request, MarkingAuditLog.Action.SCRIPT_AI_MARKED, script=script)
         return api_response(data=self.get_serializer(script).data, message='AI marking complete')
+
+    @action(detail=True, methods=['get'], url_path='answers')
+    def answers(self, request, pk=None):
+        """GET /api/exams/scripts/:id/answers/ — returns the answers for the
+        script's candidate attempt, enriched with question detail fields so
+        the marking UI can render question text + max_marks alongside each answer."""
+        script = self.get_object()
+        try:
+            attempt = script.candidate.attempt
+        except Exception:
+            return api_response(data=[])
+        answers_qs = attempt.answers.select_related('exam_question').order_by('exam_question__order')
+        return api_response(data=StudentExamAnswerSerializer(answers_qs, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='submit-for-review')
     def submit_for_review(self, request, pk=None):
@@ -842,17 +1115,50 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
                 'Only a MARKED, UPLOADED, or FAILED script can be submitted for teacher review.',
             )
 
+        # When coming from UPLOADED (AI was never involved), require every
+        # answer to already have teacher_final_marks — otherwise the examiner
+        # simply hasn't started marking yet and submit_for_review must block.
+        if script.status == ExamScript.Status.UPLOADED:
+            unmarked_count = script.candidate.attempt.answers.filter(teacher_final_marks__isnull=True).count()
+            if unmarked_count:
+                raise ValidationError(
+                    f'{unmarked_count} answer(s) still have no confirmed mark. '
+                    'Mark all answers before submitting for review.'
+                )
+
         script.status = ExamScript.Status.TEACHER_REVIEW
         script.save(update_fields=['status', 'updated_at'])
+        log_marking_action(
+            request, MarkingAuditLog.Action.SCRIPT_SUBMITTED, script=script,
+            detail={'from_status': script.status},
+        )
         return api_response(data=self.get_serializer(script).data, message='Submitted for teacher review')
 
     @action(detail=True, methods=['post'], url_path='finalize')
     def finalize(self, request, pk=None):
         script = self.get_object()
-        if not self._can_manage(request.user, script):
+        user = request.user
+        _CAN_FINALIZE = (
+            user.role == 'EXAM_MARKING_MANAGER'
+            or (user.role == 'ADMIN' and user.admin_scope == 'SCHOOL')
+            or (user.role == 'TEACHER' and script.exam.created_by_id == user.id)
+        )
+        if not _CAN_FINALIZE:
+            raise PermissionDenied('Only this exam\'s teacher or marking manager may finalize scripts.')
+        if not self._can_manage(user, script):
             raise PermissionDenied("Only this exam's editor may finalize this script.")
-        if script.status != ExamScript.Status.TEACHER_REVIEW:
-            raise ValidationError('Only a script in TEACHER_REVIEW can be finalized.')
+        _teacher_direct = user.role == 'TEACHER' and script.exam.created_by_id == user.id
+        _allowed_statuses = (
+            (ExamScript.Status.TEACHER_REVIEW, ExamScript.Status.MARKED, ExamScript.Status.UPLOADED, ExamScript.Status.FAILED)
+            if _teacher_direct
+            else (ExamScript.Status.TEACHER_REVIEW,)
+        )
+        if script.status not in _allowed_statuses:
+            raise ValidationError(
+                'Script must be in TEACHER_REVIEW before finalizing.'
+                if not _teacher_direct
+                else 'Script must be UPLOADED, MARKED, or in TEACHER_REVIEW before finalizing.'
+            )
 
         attempt = script.candidate.attempt
         answers = list(attempt.answers.select_related('exam_question'))
@@ -896,7 +1202,131 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         attempt.percentage = percentage.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         attempt.save(update_fields=['total_marks', 'score', 'percentage', 'updated_at'])
 
+        log_marking_action(
+            request, MarkingAuditLog.Action.SCRIPT_FINALIZED, script=script,
+            detail={'score': str(attempt.score), 'total_marks': attempt.total_marks,
+                    'percentage': str(attempt.percentage)},
+        )
         return api_response(data=self.get_serializer(script).data, message='Script finalized')
+
+    @action(detail=True, methods=['get', 'post', 'delete'], url_path='assign')
+    def assign(self, request, pk=None):
+        """GET: list current assignments for this script.
+        POST: assign an EXAMINER — body: {assignee_id, role}.
+        DELETE: remove an assignment — body: {assignee_id, role}.
+        Only EXAM_MARKING_MANAGER and school ADMIN may assign."""
+        script = self.get_object()
+        user = request.user
+
+        if request.method == 'GET':
+            assignments = script.assignments.select_related('assignee', 'assigned_by')
+            return api_response(data=ExamScriptAssignmentSerializer(assignments, many=True).data)
+
+        _CAN_ASSIGN = {'EXAM_MARKING_MANAGER', 'ADMIN'}
+        if user.role not in _CAN_ASSIGN and not is_system_admin(user):
+            raise PermissionDenied('Only EXAM_MARKING_MANAGER may assign scripts.')
+        if user.role == 'ADMIN' and user.school_id != script.school_id:
+            raise PermissionDenied('School admin may only assign scripts within their school.')
+
+        assignee_id = request.data.get('assignee_id')
+        role = request.data.get('role')
+        if not assignee_id or role != 'EXAMINER':
+            raise ValidationError({'detail': 'assignee_id and role (EXAMINER) are required.'})
+
+        try:
+            assignee = User.objects.get(pk=assignee_id, school_id=script.school_id)
+        except User.DoesNotExist:
+            raise ValidationError({'assignee_id': 'No such user at this school.'})
+        _is_examiner = assignee.role == 'EXAMINER' or (
+            assignee.role == 'TEACHER' and assignee.secondary_role == 'EXAMINER'
+        )
+        if not _is_examiner:
+            raise ValidationError({'assignee_id': 'Assignee must be an Examiner or a Teacher with Examiner secondary role.'})
+
+        if request.method == 'DELETE':
+            deleted, _ = ExamScriptAssignment.objects.filter(
+                script=script, assignee=assignee, role=role,
+            ).delete()
+            if not deleted:
+                raise ValidationError({'detail': 'No such assignment exists.'})
+            log_marking_action(
+                request, MarkingAuditLog.Action.SCRIPT_UNASSIGNED, script=script,
+                detail={'assignee': assignee.username, 'role': role},
+            )
+            return api_response(message='Assignment removed.')
+
+        assignment, created = ExamScriptAssignment.objects.get_or_create(
+            script=script, assignee=assignee, role=role,
+            defaults={'assigned_by': user},
+        )
+        log_marking_action(
+            request, MarkingAuditLog.Action.SCRIPT_ASSIGNED, script=script,
+            detail={'assignee': assignee.username, 'role': role},
+        )
+        return api_response(
+            data=ExamScriptAssignmentSerializer(assignment).data,
+            message='Assignment created.' if created else 'Assignment already exists.',
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['get'], url_path='assignable-users')
+    def assignable_users(self, request, pk=None):
+        """Return users at this script's school who can be assigned as examiners:
+        pure EXAMINER accounts and TEACHERs with secondary_role='EXAMINER'.
+        Only EXAM_MARKING_MANAGER and school ADMIN may call this."""
+        script = self.get_object()
+        user = request.user
+        _CAN_ASSIGN = {'EXAM_MARKING_MANAGER', 'ADMIN'}
+        if user.role not in _CAN_ASSIGN and not is_system_admin(user):
+            raise PermissionDenied('Only EXAM_MARKING_MANAGER may view assignable users.')
+        if user.role == 'ADMIN' and user.school_id != script.school_id:
+            raise PermissionDenied('School admin may only view users within their school.')
+
+        from django.db.models import Q
+        users = (
+            User.objects.filter(school_id=script.school_id)
+            .filter(
+                Q(role='EXAMINER') | Q(role='TEACHER', secondary_role='EXAMINER')
+            )
+            .order_by('first_name', 'last_name', 'username')
+            .values('id', 'username', 'first_name', 'last_name', 'role', 'secondary_role')
+        )
+        data = [
+            {
+                'id': u['id'],
+                'username': u['username'],
+                'full_name': f"{u['first_name']} {u['last_name']}".strip() or u['username'],
+                'role': u['role'],
+                'secondary_role': u['secondary_role'],
+            }
+            for u in users
+        ]
+        return api_response(data=data)
+
+    @action(detail=True, methods=['post'], url_path='reset')
+    def reset(self, request, pk=None):
+        """Emergency: reset a FAILED or PROCESSING script back to UPLOADED.
+        Only EXAM_MARKING_MANAGER may invoke this."""
+        script = self.get_object()
+        user = request.user
+        _CAN_RESET = {'EXAM_MARKING_MANAGER'}
+        if user.role not in _CAN_RESET:
+            raise PermissionDenied('Only EXAM_MARKING_MANAGER may perform an emergency script reset.')
+        if user.school_id != script.school_id:
+            raise PermissionDenied('Cannot reset scripts outside your school.')
+        if script.status not in (ExamScript.Status.FAILED, ExamScript.Status.PROCESSING):
+            raise ValidationError(
+                f'Only FAILED or PROCESSING scripts can be reset (current: {script.status}).',
+            )
+        old_status = script.status
+        script.status = ExamScript.Status.UPLOADED
+        script.marking_error = ''
+        script.save(update_fields=['status', 'marking_error', 'updated_at'])
+        log_marking_action(
+            request, MarkingAuditLog.Action.SCRIPT_RESET, script=script,
+            detail={'from_status': old_status},
+        )
+        return api_response(data=self.get_serializer(script).data, message='Script reset to UPLOADED.')
 
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
@@ -938,3 +1368,45 @@ class ExamResultViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         return StudentExamAttempt.objects.filter(
             student=self.request.user, current_script__status=ExamScript.Status.PUBLISHED,
         ).select_related('exam', 'candidate', 'current_script').prefetch_related('answers__exam_question')
+
+
+class AuditLogViewSet(
+    EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet,
+):
+    """/api/exams/audit/ — marking audit trail. Read-only. Restricted to
+    EXAM_MARKING_MANAGER (operational) and SYSTEM_ADMIN (governance)."""
+
+    serializer_class = MarkingAuditLogSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = MarkingAuditLog.objects.select_related('exam', 'script__candidate', 'actor')
+        if is_system_admin(user):
+            pass  # full visibility
+        elif user.role == 'EXAM_MARKING_MANAGER':
+            queryset = queryset.filter(exam__school_id=user.school_id)
+        else:
+            return queryset.none()
+
+        exam_id = self.request.query_params.get('exam')
+        action_filter = self.request.query_params.get('action')
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        actor_username = self.request.query_params.get('actor')
+
+        if exam_id:
+            queryset = queryset.filter(exam_id=exam_id)
+        if action_filter:
+            queryset = queryset.filter(action=action_filter)
+        if date_from:
+            queryset = queryset.filter(created_at__date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(created_at__date__lte=date_to)
+        if actor_username:
+            queryset = queryset.filter(actor_username__icontains=actor_username)
+
+        return queryset
+
+

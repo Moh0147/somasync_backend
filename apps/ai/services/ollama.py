@@ -16,16 +16,20 @@ class OllamaAIService(AIService):
         self.model = model or settings.OLLAMA_MODEL
         self.timeout = timeout if timeout is not None else settings.OLLAMA_TIMEOUT_SECONDS
 
-    def generate(self, prompt, *, system=None, timeout=None, num_predict=None):
+    def generate(self, prompt, *, system=None, timeout=None, num_predict=None, temperature=None):
         # Default is kept short for the phone-sized explanation card. Callers
         # that need longer output (e.g. answer extraction) pass num_predict
         # explicitly.
+        # temperature=0 is required for exam marking (deterministic scores).
         payload = {
             'model': self.model,
             'prompt': prompt,
             'stream': False,
             'keep_alive': '10m',
-            'options': {'temperature': 0.2, 'num_predict': num_predict if num_predict is not None else 220},
+            'options': {
+                'temperature': temperature if temperature is not None else 0.2,
+                'num_predict': num_predict if num_predict is not None else 220,
+            },
         }
         if system:
             payload['system'] = system

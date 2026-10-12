@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/ai/', include('apps.ai.urls')),
     path('api/exams/', include('apps.exams.urls')),
     path('api/analytics/', include('apps.analytics.urls')),
+    path('api/admin/', include('apps.accounts.admin_urls')),
 ]
 
 if settings.DEBUG:

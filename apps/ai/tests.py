@@ -47,6 +47,7 @@ class AIServiceConfigurationTests(TestCase):
         self.assertEqual(service.model, 'mistral')
         self.assertEqual(service.base_url, 'http://other:11434')
 
+    @override_settings(OPENAI_API_KEY='')
     def test_factory_returns_ollama_service_by_default(self):
         service = get_ai_service()
         self.assertIsInstance(service, OllamaAIService)

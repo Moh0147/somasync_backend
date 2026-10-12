@@ -43,7 +43,10 @@ class SchoolTenantIsolationTests(TestCase):
 
     def test_system_admin_can_create_school(self):
         self.auth('sysadmin')
-        response = self.client.post('/api/schools/', {'name': 'New School', 'code': 'NEW001'})
+        response = self.client.post(
+            '/api/schools/',
+            {'name': 'New School', 'code': 'NEW001'},
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['data']['code'], 'NEW001')
 

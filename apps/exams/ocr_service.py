@@ -127,8 +127,17 @@ def vision_extract_answers(file_obj, questions) -> dict:
                 continue
             for qnum, answer in parsed.items():
                 q = by_number.get(str(qnum))
-                if q and isinstance(answer, str) and answer.strip():
-                    all_answers[q.id] = answer.strip()
+                if not (q and isinstance(answer, str) and answer.strip()):
+                    continue
+                new_part = answer.strip()
+                existing = all_answers.get(q.id, '')
+                if existing:
+                    # Answer spans multiple pages — concatenate page continuations.
+                    # Skip if the new part is already contained in existing (avoid duplication).
+                    if new_part not in existing:
+                        all_answers[q.id] = existing + '\n' + new_part
+                else:
+                    all_answers[q.id] = new_part
         except (json.JSONDecodeError, Exception):
             pass
 
@@ -150,7 +159,7 @@ def _gpt4o_vision_map(image_bytes: bytes, prompt: str, api_key: str) -> str:
                 {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{b64}', 'detail': 'high'}},
             ],
         }],
-        max_tokens=2000,
+        max_tokens=4096,
     )
     return response.choices[0].message.content.strip()
 
@@ -186,7 +195,7 @@ def _gpt4o_ocr_page(image_bytes: bytes) -> str:
                 },
             ],
         }],
-        max_tokens=2000,
+        max_tokens=4096,
     )
     return response.choices[0].message.content.strip()
 

@@ -57,54 +57,122 @@ def _try_deterministic_mark(exam_question, student_answer_text):
 
     return earned, '. '.join(parts) or 'All answers marked.'
 
-PROMPT_TEMPLATE = """You are an experienced secondary-school examiner marking a student's written exam answer.
+_BASE_PROMPT = """You are an experienced NECTA CSEE examiner marking a student's written exam answer for Tanzania's national secondary school examinations.
 
 Subject: {subject}
-Topic: {topic}
+Section: {section}
 Class level: {class_level}
 
 Question: {question_text}
 Maximum marks: {max_marks}
 
-Marking scheme (expected concepts and their mark allocation):
+Marking scheme:
 {marking_scheme}
 
 Student's answer:
 {student_answer}
 
-Respond with STRICT JSON only, no other text, in exactly this shape:
-{{"marks_awarded": <integer>, "feedback": "..."}}
+{flavor_instructions}
 
-Rules:
-- marks_awarded must be a whole number between 0 and {max_marks}, inclusive.
-- Award a mark for a criterion when the student expresses the SAME IDEA or CONCEPT, even if worded differently, paraphrased, or using synonyms. Do NOT require the exact wording of the marking scheme.
-- Award marks strictly according to the marking scheme criteria above — do not invent extra criteria.
-- Ignore any introductory or opening sentence that merely restates the question (e.g. "Cardiac muscles are adapted in the following ways:"). Only the specific points that follow earn marks.
-- feedback should be a short, specific explanation of what the student got right or missed, in plain language.
+Respond with STRICT JSON only, no other text:
+{{"marks_awarded": <number>, "feedback": "..."}}
+
+General rules:
+- marks_awarded must be between 0 and {max_marks}, inclusive. Half-marks (e.g. 1.5) are allowed.
+- feedback must be short and specific — what the student got right or missed.
+- Do not invent criteria not listed in the marking scheme above.
 - Do not hallucinate facts not present in the marking scheme or the student's answer.
 """
 
+_FLAVOR_TRANSFORMATION = """\
+QUESTION TYPE: Sentence transformation / grammar drill
+- The marking scheme lists sub-questions (i), (ii), (iii) etc., each worth {item_marks} marks.
+- Mark EACH sub-answer individually: award {item_marks} for a completely correct transformation, \
+partial credit for answers showing correct understanding but with minor errors, 0 for wrong.
+- The student's answer may label sub-answers as (i), (ii), 1., 2., a), b) etc.
+- Sum the individual sub-marks to get marks_awarded.
+- {inferred_note}"""
+
+_FLAVOR_ESSAY = """\
+QUESTION TYPE: Essay / composition
+- The marking scheme provides RUBRIC CRITERIA — mark each criterion independently then sum.
+- Do not require any specific wording; reward clear communication and relevant content.
+- Consider the whole essay holistically for each criterion."""
+
+_FLAVOR_LITERATURE = """\
+QUESTION TYPE: Literature / set-book question
+- Award marks for: accurate identification of themes/characters/events, relevant textual references, \
+personal interpretation supported by evidence from the text.
+- A student may answer about any literary work — accept valid analysis even if it differs from \
+the marking scheme examples, as long as it is supported and relevant.
+- Do NOT penalise for answering about a different work than expected unless the question specifies one work."""
+
+_FLAVOR_GENERAL = """\
+- Award a mark for a criterion when the student expresses the SAME IDEA or CONCEPT, even if worded differently.
+- Ignore introductory sentences that merely restate the question."""
+
+
+def _detect_flavor(exam_question):
+    """Return ('transformation'|'essay'|'literature'|'general', item_marks, inferred)."""
+    section = (exam_question.section or '').upper()
+    items = list(exam_question.marking_scheme_items.order_by('order', 'id'))
+
+    if 'C' in section:
+        return 'literature', None, False
+
+    if exam_question.question_type == 'SUBJECTIVE' and items:
+        # Transformation: all items have the same marks and roman/digit key patterns
+        sub_pattern = re.compile(r'^\s*[\(\[]?\s*([ivxlcdmIVXLCDM]+|\d+)\s*[\)\]]?\s*$')
+        all_sub = all(sub_pattern.match(item.criterion.strip()) for item in items)
+        all_same_marks = len({item.marks for item in items}) == 1
+        if all_sub and all_same_marks:
+            inferred = any(getattr(item, 'marks_source', 'confirmed') == 'inferred' for item in items)
+            return 'transformation', items[0].marks, inferred
+
+        # Essay / rubric: 3+ diverse criteria
+        if len(items) >= 3:
+            return 'essay', None, False
+
+    return 'general', None, False
+
 
 def _build_prompt(exam_question, student_answer_text):
+    items = exam_question.marking_scheme_items.all()
     scheme_lines = '\n'.join(
         f'- {item.criterion} ({item.marks} marks)' + (f': {item.description}' if item.description else '')
-        for item in exam_question.marking_scheme_items.all()
+        for item in items
     ) or '(no marking scheme items defined)'
 
     exam = exam_question.exam
     subject = exam.subject.name if hasattr(exam.subject, 'name') else str(exam.subject)
     class_level = exam.class_level.name if hasattr(exam.class_level, 'name') else str(exam.class_level)
-    obj = exam_question.learning_objective
-    topic = obj.topic.name if obj and hasattr(obj, 'topic') and hasattr(obj.topic, 'name') else 'General'
+    section = exam_question.section or 'General'
 
-    return PROMPT_TEMPLATE.format(
+    flavor, item_marks, inferred = _detect_flavor(exam_question)
+    if flavor == 'transformation':
+        inferred_note = (
+            'Note: the per-item mark allocation is estimated (NECTA CIRA), not from the official key.'
+            if inferred else ''
+        )
+        flavor_instructions = _FLAVOR_TRANSFORMATION.format(
+            item_marks=item_marks, inferred_note=inferred_note,
+        )
+    elif flavor == 'essay':
+        flavor_instructions = _FLAVOR_ESSAY
+    elif flavor == 'literature':
+        flavor_instructions = _FLAVOR_LITERATURE
+    else:
+        flavor_instructions = _FLAVOR_GENERAL
+
+    return _BASE_PROMPT.format(
         subject=subject,
-        topic=topic,
+        section=section,
         class_level=class_level,
         question_text=exam_question.question_text,
         max_marks=exam_question.max_marks,
         marking_scheme=scheme_lines,
         student_answer=student_answer_text,
+        flavor_instructions=flavor_instructions,
     )
 
 
@@ -172,7 +240,7 @@ class ExamAIMarkingService:
             return answer
 
         prompt = _build_prompt(question, answer.recorded_answer)
-        result = get_ai_service().generate(prompt)
+        result = get_ai_service().generate(prompt, temperature=0)
         parsed = _parse_response(result.text, question.max_marks)
 
         answer.ai_marks_awarded = parsed['marks_awarded']

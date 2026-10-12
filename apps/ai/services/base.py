@@ -23,7 +23,7 @@ class AIService(ABC):
     """
 
     @abstractmethod
-    def generate(self, prompt: str, *, system: str | None = None, timeout: float | None = None, num_predict: int | None = None) -> AIServiceResponse:
+    def generate(self, prompt: str, *, system: str | None = None, timeout: float | None = None, num_predict: int | None = None, temperature: float | None = None) -> AIServiceResponse:
         """Returns an AIServiceResponse, or raises an AIServiceError subclass."""
         raise NotImplementedError
 

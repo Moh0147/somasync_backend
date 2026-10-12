@@ -27,8 +27,13 @@ def make_user(role, admin_scope=None, school=None, **extra):
 
 
 class UserRoleModelTests(TestCase):
-    def test_exactly_three_roles_exist(self):
-        self.assertEqual(set(User.Role.values), {'ADMIN', 'TEACHER', 'STUDENT'})
+    def test_roles_include_core_and_marking_domain(self):
+        expected = {
+            'ADMIN', 'TEACHER', 'STUDENT',
+            'EXAM_MARKING_MANAGER', 'CHIEF_EXAMINER', 'EXAMINER',
+            'CHECKER', 'DATA_ENTRY_CLERK', 'IT_SUPPORT',
+        }
+        self.assertEqual(set(User.Role.values), expected)
 
     def test_createsuperuser_produces_a_valid_system_admin(self):
         # Django's default create_superuser() has no idea role/admin_scope
@@ -258,3 +263,106 @@ class RolePermissionClassTests(TestCase):
             is_authenticated = False
 
         self.assertFalse(IsAdmin().has_permission(self._Request(Anon()), None))
+
+
+# ── Phase 3: user management API tests ───────────────────────────────────────
+
+class UserManagementTestBase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.school = School.objects.create(name='Test School', code='TST-UM')
+        self.sys_admin = make_user(
+            User.Role.ADMIN, admin_scope=User.AdminScope.SYSTEM, username='um_sysadmin',
+        )
+        self.school_admin = make_user(
+            User.Role.ADMIN, admin_scope=User.AdminScope.SCHOOL,
+            school=self.school, username='um_schooladmin',
+        )
+        self.teacher = make_user(User.Role.TEACHER, school=self.school, username='um_teacher')
+
+    def auth(self, username, password='pass12345'):
+        login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {login.data["data"]["access"]}')
+
+
+class UserListCreateTests(UserManagementTestBase):
+    def test_system_admin_can_list_users(self):
+        self.auth('um_sysadmin')
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 200)
+        ids = [u['id'] for u in response.data['data']]
+        # System admin itself excluded.
+        self.assertNotIn(self.sys_admin.id, ids)
+        # School admin and teacher present.
+        self.assertIn(self.school_admin.id, ids)
+        self.assertIn(self.teacher.id, ids)
+
+    def test_school_admin_cannot_list_users(self):
+        self.auth('um_schooladmin')
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_system_admin_can_create_examiner(self):
+        self.auth('um_sysadmin')
+        response = self.client.post('/api/admin/users/', {
+            'username': 'new_examiner',
+            'password': 'pass12345',
+            'role': 'EXAMINER',
+            'school': self.school.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        data = response.data['data']
+        self.assertEqual(data['role'], 'EXAMINER')
+        self.assertEqual(data['school'], self.school.id)
+
+    def test_create_examiner_without_school_rejected(self):
+        self.auth('um_sysadmin')
+        response = self.client.post('/api/admin/users/', {
+            'username': 'no_school_examiner',
+            'password': 'pass12345',
+            'role': 'EXAMINER',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_duplicate_username_rejected(self):
+        self.auth('um_sysadmin')
+        self.client.post('/api/admin/users/', {
+            'username': 'dup_user', 'password': 'pass12345',
+            'role': 'EXAMINER', 'school': self.school.id,
+        })
+        response = self.client.post('/api/admin/users/', {
+            'username': 'dup_user', 'password': 'pass12345',
+            'role': 'EXAMINER', 'school': self.school.id,
+        })
+        self.assertEqual(response.status_code, 400)
+
+
+class UserDetailManagementTests(UserManagementTestBase):
+    def test_system_admin_can_get_user(self):
+        self.auth('um_sysadmin')
+        response = self.client.get(f'/api/admin/users/{self.teacher.id}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['data']['username'], 'um_teacher')
+
+    def test_system_admin_can_change_role(self):
+        self.auth('um_sysadmin')
+        response = self.client.patch(f'/api/admin/users/{self.teacher.id}/', {
+            'role': 'EXAMINER', 'school': self.school.id,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['data']['role'], 'EXAMINER')
+
+    def test_system_admin_can_deactivate_user(self):
+        self.auth('um_sysadmin')
+        response = self.client.patch(f'/api/admin/users/{self.teacher.id}/', {'is_active': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['data']['is_active'])
+
+    def test_system_admin_cannot_see_self(self):
+        self.auth('um_sysadmin')
+        response = self.client.get(f'/api/admin/users/{self.sys_admin.id}/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_unauthenticated_cannot_access(self):
+        response = self.client.get('/api/admin/users/')
+        self.assertEqual(response.status_code, 401)

@@ -128,11 +128,18 @@ class MarkingSchemeItem(models.Model):
     — enforced at creation time (ExamQuestionViewSet.marking_scheme), not
     just at some later finalization step."""
 
+    class MarksSource(models.TextChoices):
+        CONFIRMED = 'confirmed', 'Confirmed from official scheme'
+        INFERRED  = 'inferred',  'Inferred/estimated (e.g. from CIRA)'
+
     exam_question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE, related_name='marking_scheme_items')
     criterion = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     marks = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(0.01)])
     order = models.PositiveIntegerField(default=0)
+    marks_source = models.CharField(
+        max_length=10, choices=MarksSource.choices, default=MarksSource.CONFIRMED,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -143,10 +150,8 @@ class MarkingSchemeItem(models.Model):
 
 
 class ExamCandidate(models.Model):
-    """Links a student to an exam via a candidate number (e.g. F2A-001),
-    unique per exam — the identity mechanism scripts are matched against
-    later (Phase 15). Deliberately NOT handwriting/OCR-based; a candidate
-    number is an explicit, typed value, never inferred from an image."""
+    """Links a student to an exam via a candidate number, unique per exam —
+    the identity mechanism scripts are matched against later."""
 
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='candidates')
     student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='exam_candidacies')
@@ -277,6 +282,49 @@ class ExamScriptPage(models.Model):
         return f'{self.script} — page {self.page_number}'
 
 
+class ExamScriptAssignment(models.Model):
+    """Assigns an EXAMINER or CHECKER to a specific script.
+
+    Created by EXAM_MARKING_MANAGER or CHIEF_EXAMINER via the allocations
+    API (Phase 4). Present from Phase 2 so `_can_manage` / `_can_mark`
+    can enforce per-examiner script scoping without script ID guessing."""
+
+    class Role(models.TextChoices):
+        EXAMINER = 'EXAMINER', 'Examiner'
+        CHECKER = 'CHECKER', 'Checker'
+
+    script = models.ForeignKey(ExamScript, on_delete=models.CASCADE, related_name='assignments')
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='script_assignments',
+    )
+    role = models.CharField(max_length=10, choices=Role.choices)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='script_assignments_made',
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['script', 'assignee', 'role'], name='unique_script_assignment_per_role',
+            ),
+        ]
+        ordering = ['assigned_at']
+
+    def clean(self):
+        super().clean()
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if self.assignee_id and self.assignee.role not in ('EXAMINER', 'CHECKER'):
+            raise ValidationError('Only EXAMINER or CHECKER users can be assigned to scripts.')
+        if self.script_id and self.assignee_id and self.script.school_id != self.assignee.school_id:
+            raise ValidationError('Assignee must belong to the same school as the script.')
+
+    def __str__(self):
+        return f'{self.assignee.username} ({self.role}) → {self.script}'
+
+
+
 class StudentExamAttempt(models.Model):
     """One per (exam, candidate) — enforced via `candidate` being a
     OneToOneField, since ExamCandidate already uniquely pairs (exam,
@@ -363,3 +411,50 @@ class StudentExamAnswer(models.Model):
 
     def __str__(self):
         return f'{self.attempt} - Q{self.exam_question.question_number}'
+
+
+class MarkingAuditLog(models.Model):
+    """Append-only record of every state-changing action in the marking
+    domain. FKs use SET_NULL so the trail survives deletion of its
+    subjects. `actor_username`/`actor_role` are snapshotted at write time
+    so the log stays readable after account changes."""
+
+    class Action(models.TextChoices):
+        SCRIPT_SUBMITTED = 'SCRIPT_SUBMITTED', 'Submitted for review'
+        SCRIPT_FINALIZED = 'SCRIPT_FINALIZED', 'Finalized'
+        SCRIPT_AI_MARKED = 'SCRIPT_AI_MARKED', 'AI marked'
+        SCRIPT_OCR_RAN = 'SCRIPT_OCR_RAN', 'OCR ran'
+        SCRIPT_RESET = 'SCRIPT_RESET', 'Emergency reset'
+        ANSWER_MARKED = 'ANSWER_MARKED', 'Answer marked'
+        SCRIPT_ASSIGNED = 'SCRIPT_ASSIGNED', 'Script assigned'
+        SCRIPT_UNASSIGNED = 'SCRIPT_UNASSIGNED', 'Assignment removed'
+
+    exam = models.ForeignKey(
+        Exam, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs',
+    )
+    script = models.ForeignKey(
+        ExamScript, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs',
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+        related_name='marking_audit_logs',
+    )
+    actor_username = models.CharField(max_length=150)
+    actor_role = models.CharField(max_length=50)
+    action = models.CharField(max_length=20, choices=Action.choices)
+    detail = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['exam', 'created_at']),
+            models.Index(fields=['actor', 'created_at']),
+            models.Index(fields=['action', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.actor_username} — {self.action} at {self.created_at:%Y-%m-%d %H:%M}'
+
+

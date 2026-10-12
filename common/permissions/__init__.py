@@ -3,9 +3,40 @@ from rest_framework.permissions import BasePermission
 ROLE_ADMIN = 'ADMIN'
 ROLE_TEACHER = 'TEACHER'
 ROLE_STUDENT = 'STUDENT'
+ROLE_EXAM_MARKING_MANAGER = 'EXAM_MARKING_MANAGER'
+ROLE_CHIEF_EXAMINER = 'CHIEF_EXAMINER'
+ROLE_EXAMINER = 'EXAMINER'
+ROLE_CHECKER = 'CHECKER'
+ROLE_DATA_ENTRY_CLERK = 'DATA_ENTRY_CLERK'
+ROLE_IT_SUPPORT = 'IT_SUPPORT'
 
 SCOPE_SYSTEM = 'SYSTEM'
 SCOPE_SCHOOL = 'SCHOOL'
+
+# MVP marking roles: EXAM_MARKING_MANAGER has full operational access;
+# EXAMINER can upload, OCR, AI-mark, confirm marks and submit for review.
+# SYSTEM_ADMIN is intentionally absent — it must NOT grant routine
+# marking access (see the non-negotiable rule in the RBAC plan).
+# Legacy roles (CHIEF_EXAMINER, CHECKER, DATA_ENTRY_CLERK, IT_SUPPORT)
+# are preserved in the DB but removed from active permission sets.
+MARKING_OPERATIONAL_ROLES = frozenset({
+    ROLE_EXAM_MARKING_MANAGER,
+    ROLE_EXAMINER,
+})
+
+# All roles that may READ marking domain resources (scripts, answers).
+# SYSTEM_ADMIN is intentionally absent — use the admin overview endpoints.
+MARKING_READ_ROLES = frozenset({
+    ROLE_EXAM_MARKING_MANAGER,
+    ROLE_EXAMINER,
+})
+
+# All roles that carry a school FK (non-admin school-scoped users).
+SCHOOL_SCOPED_ROLES = frozenset({
+    ROLE_TEACHER, ROLE_STUDENT,
+    ROLE_EXAM_MARKING_MANAGER, ROLE_CHIEF_EXAMINER, ROLE_EXAMINER,
+    ROLE_CHECKER, ROLE_DATA_ENTRY_CLERK, ROLE_IT_SUPPORT,
+})
 
 
 def _authenticated(request):
@@ -13,17 +44,26 @@ def _authenticated(request):
 
 
 def is_system_admin(user):
-    """True only for a SYSTEM-scoped admin, who is the sole role allowed to
-    span every school (tenant)."""
+    """True only for a SYSTEM-scoped admin, who spans every school.
+    Must NOT be used to grant routine marking-domain permissions."""
     return bool(
         user and user.is_authenticated
         and user.role == ROLE_ADMIN and user.admin_scope == SCOPE_SYSTEM
     )
 
 
+def is_marking_role(user):
+    """True if the user holds any operational marking role."""
+    return bool(
+        user and user.is_authenticated
+        and user.role in MARKING_OPERATIONAL_ROLES
+    )
+
+
+# ── Standard role permission classes ─────────────────────────────────────────
+
 class IsAdmin(BasePermission):
     """Any ADMIN, regardless of scope (SYSTEM or SCHOOL)."""
-
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_ADMIN
 
@@ -52,12 +92,49 @@ class IsStudent(BasePermission):
         return _authenticated(request) and request.user.role == ROLE_STUDENT
 
 
-class IsOwnSchool(BasePermission):
-    """Object-level permission for the School model itself. A SYSTEM admin
-    may access any school; everyone else only the school they belong to.
-    Compares against request.user.school_id — a client-supplied school_id
-    is never consulted here."""
+# ── Marking domain permission classes ────────────────────────────────────────
 
+class IsExamMarkingManager(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_EXAM_MARKING_MANAGER
+
+
+class IsChiefExaminer(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_CHIEF_EXAMINER
+
+
+class IsExaminer(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_EXAMINER
+
+
+class IsChecker(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_CHECKER
+
+
+class IsDataEntryClerk(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_DATA_ENTRY_CLERK
+
+
+class IsITSupport(BasePermission):
+    def has_permission(self, request, view):
+        return _authenticated(request) and request.user.role == ROLE_IT_SUPPORT
+
+
+class IsMarkingRole(BasePermission):
+    """Any user with an active MVP marking role (EXAM_MARKING_MANAGER or
+    EXAMINER). Deliberately excludes SYSTEM_ADMIN."""
+    def has_permission(self, request, view):
+        return is_marking_role(request.user)
+
+
+# ── Object-level permission classes ──────────────────────────────────────────
+
+class IsOwnSchool(BasePermission):
+    """Object-level permission for the School model itself."""
     def has_object_permission(self, request, view, obj):
         if not _authenticated(request):
             return False
@@ -67,10 +144,7 @@ class IsOwnSchool(BasePermission):
 
 
 class IsTenantObjectOwner(BasePermission):
-    """Object-level permission for models with a `school` FK (lessons,
-    classes, quizzes, etc. in later phases). A SYSTEM admin may access any
-    row; everyone else only rows belonging to their own school."""
-
+    """Object-level permission for models with a `school` FK."""
     def has_object_permission(self, request, view, obj):
         if not _authenticated(request):
             return False
@@ -81,15 +155,9 @@ class IsTenantObjectOwner(BasePermission):
 
 class IsOwnerOrSchoolAdmin(BasePermission):
     """Object-level permission for content a specific user authors within
-    their school (lessons, and likely quizzes/exams in later phases). A
-    SYSTEM admin may act on anything; a SCHOOL admin of the object's own
-    school may act on it for oversight; otherwise only the object's owner
-    (by default `created_by`) may act on it.
-
-    has_permission() is left at BasePermission's default (True), so the
-    real check runs at object-fetch time via has_object_permission — the
-    normal DRF pattern for an "owner or admin" rule, since there's no
-    object to check ownership against until then."""
+    their school. A SYSTEM admin may act on anything; a SCHOOL admin of
+    the object's own school may act on it for oversight; otherwise only
+    the object's `created_by` owner may act on it."""
 
     owner_field = 'created_by'
 
@@ -106,8 +174,7 @@ class IsOwnerOrSchoolAdmin(BasePermission):
 class TenantScopedQuerysetMixin:
     """Mixin for viewsets whose queryset must be scoped to the requesting
     user's school. A SYSTEM admin sees every row; everyone else sees only
-    rows belonging to their own school — derived solely from
-    `request.user.school_id`, never from a client-supplied school_id."""
+    rows belonging to their own school."""
 
     tenant_field = 'school'
 

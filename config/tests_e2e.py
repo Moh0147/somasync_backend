@@ -46,6 +46,7 @@ class FullLifecycleTests(TestCase):
             User.Role.ADMIN, school=self.school, admin_scope=User.AdminScope.SCHOOL, username='e2e_admin',
         )
         self.teacher = make_user(User.Role.TEACHER, school=self.school, username='e2e_teacher')
+        self.manager = make_user(User.Role.EXAM_MARKING_MANAGER, school=self.school, username='e2e_manager')
         self.student = make_user(User.Role.STUDENT, school=self.school, username='e2e_student')
         self.other_student = make_user(User.Role.STUDENT, school=self.other_school, username='e2e_other_student')
 
@@ -225,6 +226,9 @@ class FullLifecycleTests(TestCase):
         self.client.post(f'/api/exams/answers/{subjective_answer_id}/mark/', {'teacher_final_marks': 7})
 
         self.client.post(f'/api/exams/scripts/{script_id}/submit-for-review/')
+
+        # Finalize and publish are EXAM_MARKING_MANAGER-only actions.
+        self.auth('e2e_manager')
         finalize_resp = self.client.post(f'/api/exams/scripts/{script_id}/finalize/')
         self.assertEqual(finalize_resp.status_code, 200)
         self.assertEqual(finalize_resp.data['data']['status'], 'FINALIZED')
