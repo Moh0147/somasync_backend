@@ -9,14 +9,12 @@ from apps.schools.models import School
 
 from .models import LessonProgress
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class ProgressTestBase(TestCase):
     def setUp(self):
@@ -39,7 +37,6 @@ class ProgressTestBase(TestCase):
             school=self.school_a, name='Form II Blue', class_level=self.form_2, academic_year=2026,
         )
         StudentClassMembership.objects.create(school_class=self.class_a, student=self.student_a)
-        # student_a2 deliberately NOT enrolled in any class.
 
         self.lesson = Lesson.objects.create(
             school=self.school_a, subject=self.subject_a, class_level=self.form_2,
@@ -57,7 +54,6 @@ class ProgressTestBase(TestCase):
         login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
-
 
 class TrackProgressTests(ProgressTestBase):
     def test_student_can_create_progress(self):
@@ -102,7 +98,7 @@ class TrackProgressTests(ProgressTestBase):
         self.assertEqual(response.status_code, 400)
 
     def test_cannot_track_progress_for_unassigned_lesson(self):
-        self.auth('pr_student_a2')  # not enrolled in any class
+        self.auth('pr_student_a2')
         response = self.client.post('/api/progress/track/', {'lesson': self.lesson.id, 'progress_percentage': 10})
         self.assertEqual(response.status_code, 400)
 
@@ -131,7 +127,6 @@ class TrackProgressTests(ProgressTestBase):
             'lesson': self.lesson.id, 'progress_percentage': 20, 'student': self.student_a2.id,
         })
         self.assertEqual(response.data['data']['student'], self.student_a.id)
-
 
 class ProgressOwnershipAndVisibilityTests(ProgressTestBase):
     def setUp(self):
@@ -174,14 +169,12 @@ class ProgressOwnershipAndVisibilityTests(ProgressTestBase):
         response = self.client.get('/api/progress/')
         self.assertEqual(response.status_code, 401)
 
-
 class ProgressSchoolIsolationTests(ProgressTestBase):
     def setUp(self):
         super().setUp()
         self.auth('pr_student_a')
         self.client.post('/api/progress/track/', {'lesson': self.lesson.id, 'progress_percentage': 50})
 
-        # School B's own lesson + progress, for isolation checks.
         self.subject_b = Subject.objects.create(school=self.school_b, name='Mathematics')
         self.class_b = SchoolClass.objects.create(
             school=self.school_b, name='F2B', class_level=self.form_2, academic_year=2026,

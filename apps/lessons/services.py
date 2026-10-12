@@ -9,7 +9,6 @@ from apps.quizzes.services import QuizMarkingService, save_quiz_answer
 
 from .models import StudentSectionProgress
 
-
 def section_statuses_for_student(lesson, student):
     """Ordered [{section, status, best_score, attempts}, ...] for one
     student's view of one lesson's sections. Side-effect-free (a GET must
@@ -38,7 +37,6 @@ def section_statuses_for_student(lesson, student):
         results.append({'section': section, 'status': status, 'best_score': best_score, 'attempts': attempts})
     return results
 
-
 def section_status_for_student(section, student):
     """Single-section version of the above, used by the content/
     submit-quiz access checks."""
@@ -50,11 +48,9 @@ def section_status_for_student(section, student):
         return StudentSectionProgress.Status.AVAILABLE
     return StudentSectionProgress.Status.LOCKED
 
-
 def ensure_section_accessible(section, student):
     if section_status_for_student(section, student) == StudentSectionProgress.Status.LOCKED:
         raise PermissionDenied('This section is locked -- complete the previous section first.')
-
 
 def submit_section_quiz(student, section, answers_data):
     """Runs one mini-quiz attempt for `student` on `section`, entirely
@@ -103,9 +99,6 @@ def submit_section_quiz(student, section, answers_data):
                     student=student, section=next_section,
                     defaults={'school': next_section.school, 'status': StudentSectionProgress.Status.AVAILABLE},
                 )
-                # A previous attempt or an older client may already have
-                # materialized this row as LOCKED. get_or_create() does not
-                # apply defaults to existing rows, so explicitly promote it.
                 if not created and next_progress.status == StudentSectionProgress.Status.LOCKED:
                     next_progress.status = StudentSectionProgress.Status.AVAILABLE
                     next_progress.save(update_fields=['status', 'updated_at'])

@@ -12,8 +12,6 @@ question_router.register('', QuestionViewSet, basename='question')
 attempt_router = DefaultRouter()
 attempt_router.register('', StudentQuizAttemptViewSet, basename='quizattempt')
 
-# 'questions/' and 'attempts/' must be listed before the quiz router's
-# catch-all `<pk>/` pattern, or they'd be swallowed as an attempted quiz pk.
 urlpatterns = [
     path('questions/', include(question_router.urls)),
     path('attempts/', include(attempt_router.urls)),

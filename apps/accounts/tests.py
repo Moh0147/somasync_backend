@@ -13,7 +13,6 @@ from common.throttling import LoginRateThrottle
 
 from .models import User
 
-
 def make_user(role, admin_scope=None, school=None, **extra):
     defaults = {'username': f'{role.lower()}-{admin_scope or "x"}', 'password': 'pass12345'}
     defaults.update(extra)
@@ -25,7 +24,6 @@ def make_user(role, admin_scope=None, school=None, **extra):
     user.save()
     return user
 
-
 class UserRoleModelTests(TestCase):
     def test_roles_include_core_and_marking_domain(self):
         expected = {
@@ -36,9 +34,6 @@ class UserRoleModelTests(TestCase):
         self.assertEqual(set(User.Role.values), expected)
 
     def test_createsuperuser_produces_a_valid_system_admin(self):
-        # Django's default create_superuser() has no idea role/admin_scope
-        # exist -- it used to leave role='' and blow up the
-        # school_required_unless_system_admin CHECK constraint on save.
         user = User.objects.create_superuser(username='rootuser', email='root@example.com', password='pass12345')
         self.assertEqual(user.role, User.Role.ADMIN)
         self.assertEqual(user.admin_scope, User.AdminScope.SYSTEM)
@@ -59,13 +54,13 @@ class UserRoleModelTests(TestCase):
     def test_system_admin_is_valid(self):
         user = User(username='sysadmin', role=User.Role.ADMIN, admin_scope=User.AdminScope.SYSTEM)
         user.set_password('pass12345')
-        user.full_clean()  # should not raise
+        user.full_clean()
 
     def test_school_admin_is_valid(self):
         school = School.objects.create(name='Valid School', code='VS001')
         user = User(username='schooladmin', role=User.Role.ADMIN, admin_scope=User.AdminScope.SCHOOL, school=school)
         user.set_password('pass12345')
-        user.full_clean()  # should not raise
+        user.full_clean()
 
     def test_teacher_without_school_is_invalid(self):
         user = User(username='homelessteacher', role=User.Role.TEACHER)
@@ -87,7 +82,6 @@ class UserRoleModelTests(TestCase):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 User.objects.create(username='sneaky', role=User.Role.TEACHER, admin_scope=User.AdminScope.SYSTEM)
-
 
 class LoginEndpointTests(TestCase):
     def setUp(self):
@@ -113,7 +107,6 @@ class LoginEndpointTests(TestCase):
         response = self.client.post('/api/auth/login/', {'username': 'ghost', 'password': 'whatever'})
         self.assertEqual(response.status_code, 401)
 
-
 class RefreshEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -132,7 +125,6 @@ class RefreshEndpointTests(TestCase):
         response = self.client.post('/api/auth/refresh/', {'refresh': 'not-a-real-token'})
         self.assertEqual(response.status_code, 401)
         self.assertFalse(response.data['success'])
-
 
 class LogoutEndpointTests(TestCase):
     def setUp(self):
@@ -153,8 +145,6 @@ class LogoutEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['success'])
 
-        # The now-blacklisted refresh token must be rejected, even though
-        # it hasn't expired yet.
         refresh_attempt = self.client.post('/api/auth/refresh/', {'refresh': self.refresh})
         self.assertEqual(refresh_attempt.status_code, 401)
 
@@ -168,7 +158,6 @@ class LogoutEndpointTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access}')
         response = self.client.post('/api/auth/logout/', {})
         self.assertEqual(response.status_code, 400)
-
 
 @override_settings(THROTTLING_ENABLED=True)
 class LoginThrottleTests(TestCase):
@@ -203,7 +192,6 @@ class LoginThrottleTests(TestCase):
         response = self.client.post('/api/auth/login/', {'username': 'throttled', 'password': 'wrong'})
         self.assertEqual(response.status_code, 429)
 
-
 class MeEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -226,7 +214,6 @@ class MeEndpointTests(TestCase):
         self.assertEqual(response.data['data']['username'], 'admin1')
         self.assertEqual(response.data['data']['role'], 'ADMIN')
         self.assertEqual(response.data['data']['admin_scope'], 'SCHOOL')
-
 
 class RolePermissionClassTests(TestCase):
     class _Request:
@@ -264,9 +251,6 @@ class RolePermissionClassTests(TestCase):
 
         self.assertFalse(IsAdmin().has_permission(self._Request(Anon()), None))
 
-
-# ── Phase 3: user management API tests ───────────────────────────────────────
-
 class UserManagementTestBase(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -284,16 +268,13 @@ class UserManagementTestBase(TestCase):
         login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {login.data["data"]["access"]}')
 
-
 class UserListCreateTests(UserManagementTestBase):
     def test_system_admin_can_list_users(self):
         self.auth('um_sysadmin')
         response = self.client.get('/api/admin/users/')
         self.assertEqual(response.status_code, 200)
         ids = [u['id'] for u in response.data['data']]
-        # System admin itself excluded.
         self.assertNotIn(self.sys_admin.id, ids)
-        # School admin and teacher present.
         self.assertIn(self.school_admin.id, ids)
         self.assertIn(self.teacher.id, ids)
 
@@ -335,7 +316,6 @@ class UserListCreateTests(UserManagementTestBase):
             'role': 'EXAMINER', 'school': self.school.id,
         })
         self.assertEqual(response.status_code, 400)
-
 
 class UserDetailManagementTests(UserManagementTestBase):
     def test_system_admin_can_get_user(self):

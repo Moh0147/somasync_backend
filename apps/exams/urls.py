@@ -24,9 +24,6 @@ result_router.register('', ExamResultViewSet, basename='examresult')
 audit_router = DefaultRouter()
 audit_router.register('', AuditLogViewSet, basename='markingauditlog')
 
-# 'questions/', 'answers/', 'scripts/', 'results/', 'audit/' must be listed
-# before the exam router's catch-all `<pk>/` pattern, or they'd be swallowed
-# as an attempted exam pk.
 urlpatterns = [
     path('questions/', include(question_router.urls)),
     path('answers/', include(answer_router.urls)),

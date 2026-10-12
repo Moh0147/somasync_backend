@@ -2,7 +2,6 @@ from django.contrib.auth.models import AbstractUser, UserManager as DjangoUserMa
 from django.core.exceptions import ValidationError
 from django.db import models
 
-
 class UserManager(DjangoUserManager):
     """Django's default create_superuser() has no idea about `role`/
     `admin_scope`/`school` -- it would leave role='' (no default), which
@@ -17,7 +16,6 @@ class UserManager(DjangoUserManager):
         extra_fields.setdefault('admin_scope', User.AdminScope.SYSTEM)
         return super().create_superuser(username, email, password, **extra_fields)
 
-
 class User(AbstractUser):
     """SomaSync's custom user. Exactly three roles exist — ADMIN, TEACHER,
     STUDENT — never separate system-admin/school-admin roles. An ADMIN's
@@ -31,7 +29,6 @@ class User(AbstractUser):
         ADMIN = 'ADMIN', 'Admin'
         TEACHER = 'TEACHER', 'Teacher'
         STUDENT = 'STUDENT', 'Student'
-        # Marking domain roles (Phase 2+)
         EXAM_MARKING_MANAGER = 'EXAM_MARKING_MANAGER', 'Exam Marking Manager'
         CHIEF_EXAMINER = 'CHIEF_EXAMINER', 'Chief Examiner'
         EXAMINER = 'EXAMINER', 'Examiner'
@@ -43,18 +40,13 @@ class User(AbstractUser):
         SYSTEM = 'SYSTEM', 'System'
         SCHOOL = 'SCHOOL', 'School'
 
-    # Roles that must always belong to a school.
     _SCHOOL_REQUIRED_ROLES = {
         'TEACHER', 'STUDENT',
         'EXAMINER', 'CHECKER', 'DATA_ENTRY_CLERK', 'IT_SUPPORT',
     }
-    # Marking management roles — school is optional. When school is set they
-    # see only that school's data; when NULL they have cross-school oversight.
     _SCHOOL_OPTIONAL_MARKING_ROLES = {'EXAM_MARKING_MANAGER', 'CHIEF_EXAMINER'}
 
     role = models.CharField(max_length=20, choices=Role.choices)
-    # A TEACHER who is also assigned marking duties can have a secondary role
-    # (EXAMINER or CHECKER). They choose which role to activate at login time.
     secondary_role = models.CharField(
         max_length=20, choices=Role.choices, null=True, blank=True,
         help_text='Optional second role for teachers who also serve as examiners or checkers.',
@@ -86,10 +78,8 @@ class User(AbstractUser):
                     | models.Q(role='ADMIN', admin_scope='SCHOOL', school__isnull=False)
                     | models.Q(role='TEACHER', school__isnull=False)
                     | models.Q(role='STUDENT', school__isnull=False)
-                    # Marking management roles: school is optional (cross-school oversight)
                     | models.Q(role='EXAM_MARKING_MANAGER')
                     | models.Q(role='CHIEF_EXAMINER')
-                    # School-bound marking roles: must always have a school
                     | models.Q(role='EXAMINER', school__isnull=False)
                     | models.Q(role='CHECKER', school__isnull=False)
                     | models.Q(role='DATA_ENTRY_CLERK', school__isnull=False)

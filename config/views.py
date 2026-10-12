@@ -4,7 +4,6 @@ from rest_framework.permissions import AllowAny
 
 from common.utils import api_response
 
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):

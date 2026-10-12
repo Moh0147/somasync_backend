@@ -4,7 +4,6 @@ from .openai_service import OpenAIService
 
 __all__ = ['AIService', 'AIServiceResponse', 'OllamaAIService', 'OpenAIService', 'get_ai_service']
 
-
 def get_ai_service() -> AIService:
     """Returns the best available AIService.
     Prefers OpenAI when OPENAI_API_KEY is set; falls back to Ollama."""

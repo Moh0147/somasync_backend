@@ -12,7 +12,6 @@ from apps.schools.models import School
 
 from .models import SyncRecord
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
@@ -20,10 +19,8 @@ def create_user(role, school=None, admin_scope=None, username=None, password='pa
     user.save()
     return user
 
-
 def uid():
     return str(uuid.uuid4())
-
 
 class SyncTestBase(TestCase):
     def setUp(self):
@@ -81,7 +78,6 @@ class SyncTestBase(TestCase):
         data.update(overrides)
         return {'entity_type': 'quiz_attempt', 'client_id': client_id or uid(), 'data': data}
 
-
 class PushFirstSyncTests(SyncTestBase):
     def setUp(self):
         super().setUp()
@@ -128,7 +124,6 @@ class PushFirstSyncTests(SyncTestBase):
         response = self.push([self.progress_item()])
         self.assertEqual(response.status_code, 401)
 
-
 class PushDuplicateAndRetryTests(SyncTestBase):
     def setUp(self):
         super().setUp()
@@ -142,7 +137,6 @@ class PushDuplicateAndRetryTests(SyncTestBase):
         self.assertEqual(r1.data['data']['results'][0]['status'], 'SYNCED')
         self.assertEqual(r2.data['data']['results'][0]['status'], 'SYNCED')
         self.assertEqual(SyncRecord.objects.filter(client_id='dup-1').count(), 1)
-        # The second push short-circuited -- attempts should NOT increment again.
         record = SyncRecord.objects.get(client_id='dup-1')
         self.assertEqual(record.attempts, 1)
 
@@ -150,16 +144,13 @@ class PushDuplicateAndRetryTests(SyncTestBase):
         item = self.attempt_item(client_id='dup-attempt-1')
         self.push([item])
         self.push([item])
-        # The attempt's own client_attempt_id equals the sync client_id (see registry._push_quiz_attempt).
         self.assertEqual(StudentQuizAttempt.objects.filter(client_attempt_id='dup-attempt-1').count(), 1)
 
     def test_failed_push_can_be_retried_and_succeed(self):
-        # First push references a lesson that doesn't exist -> FAILED.
         bad_item = self.progress_item(client_id='retry-1', lesson=999999)
         r1 = self.push([bad_item])
         self.assertEqual(r1.data['data']['results'][0]['status'], 'FAILED')
 
-        # Retry with the SAME client_id but corrected data -> SYNCED.
         good_item = self.progress_item(client_id='retry-1')
         r2 = self.push([good_item])
         self.assertEqual(r2.data['data']['results'][0]['status'], 'SYNCED')
@@ -205,11 +196,8 @@ class PushDuplicateAndRetryTests(SyncTestBase):
         self.assertEqual(statuses, ['FAILED', 'SYNCED'])
         self.assertIn('simulated DB error', response.data['data']['results'][0]['error'])
 
-        # The second item's row must have actually committed, not just
-        # been reflected in the in-memory response.
         record = SyncRecord.objects.get(client_id=good_item['client_id'])
         self.assertEqual(record.status, SyncRecord.Status.SYNCED)
-
 
 class PushValidationAndIsolationTests(SyncTestBase):
     def setUp(self):
@@ -227,14 +215,14 @@ class PushValidationAndIsolationTests(SyncTestBase):
 
     def test_push_cross_school_quiz_attempt_fails(self):
         self.auth('sy_student_b')
-        item = self.attempt_item()  # references School A's quiz
+        item = self.attempt_item()
         response = self.push([item])
         self.assertEqual(response.data['data']['results'][0]['status'], 'FAILED')
         self.assertFalse(StudentQuizAttempt.objects.filter(student=self.student_b).exists())
 
     def test_push_cross_school_lesson_progress_fails(self):
         self.auth('sy_student_b')
-        item = self.progress_item()  # references School A's lesson
+        item = self.progress_item()
         response = self.push([item])
         self.assertEqual(response.data['data']['results'][0]['status'], 'FAILED')
 
@@ -243,7 +231,6 @@ class PushValidationAndIsolationTests(SyncTestBase):
         self.push([item])
         record = SyncRecord.objects.get(client_id='school-check-1')
         self.assertEqual(record.school_id, self.school_a.id)
-
 
 class PullTests(SyncTestBase):
     def setUp(self):

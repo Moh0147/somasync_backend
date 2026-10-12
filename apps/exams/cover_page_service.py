@@ -14,15 +14,12 @@ Dependencies already in requirements.txt: PyMuPDF (fitz), Pillow, qrcode.
 
 import io
 
-import fitz  # PyMuPDF
+import fitz
 import qrcode
 from PIL import Image
 
-
-# A4 in points (72 pt/inch): 595 × 842
 PAGE_W = 595
 PAGE_H = 842
-
 
 def _qr_png_bytes(data: str) -> bytes:
     qr = qrcode.QRCode(
@@ -38,7 +35,6 @@ def _qr_png_bytes(data: str) -> bytes:
     img.save(buf, format='PNG')
     return buf.getvalue()
 
-
 def _ct(page: fitz.Page, y: float, text: str, fontsize: float,
         fontname: str = 'helv', color: tuple = (0, 0, 0),
         x0: float = 40, x1: float = PAGE_W - 40) -> None:
@@ -46,7 +42,6 @@ def _ct(page: fitz.Page, y: float, text: str, fontsize: float,
     text_w = fitz.get_text_length(text, fontname=fontname, fontsize=fontsize)
     x = x0 + max(0.0, (x1 - x0 - text_w) / 2)
     page.insert_text((x, y), text, fontsize=fontsize, fontname=fontname, color=color)
-
 
 def generate_cover_pages(exam, candidates) -> bytes:
     """Return a multi-page PDF (bytes) with one cover page per candidate.
@@ -76,27 +71,21 @@ def generate_cover_pages(exam, candidates) -> bytes:
     for candidate in candidates:
         page: fitz.Page = doc.new_page(width=PAGE_W, height=PAGE_H)
 
-        # ── top border strip ──────────────────────────────────────────────
         page.draw_rect(fitz.Rect(0, 0, PAGE_W, 6), color=None, fill=(0.1, 0.3, 0.7))
 
-        # ── school name ───────────────────────────────────────────────────
         _ct(page, 40, school_name.upper(), 14, color=(0.1, 0.3, 0.7))
         _ct(page, 58, f'({school_code})', 10, color=(0.4, 0.4, 0.4))
 
-        # ── divider ───────────────────────────────────────────────────────
         page.draw_line((40, 68), (PAGE_W - 40, 68), color=(0.8, 0.8, 0.8), width=0.5)
 
-        # ── exam title ────────────────────────────────────────────────────
         _ct(page, 90, exam_title, 16, color=(0.05, 0.05, 0.05))
 
-        # ── exam meta row ─────────────────────────────────────────────────
         meta = f'{subject_name}  ·  {level_name}  ·  {academic_year}'
         _ct(page, 110, meta, 10, color=(0.4, 0.4, 0.4))
 
         date_marks = f'Date: {exam_date}   Total Marks: {total_marks}'
         _ct(page, 126, date_marks, 9, color=(0.5, 0.5, 0.5))
 
-        # ── dashed cut-line ───────────────────────────────────────────────
         page.draw_line(
             (40, 144), (PAGE_W - 40, 144),
             color=(0.6, 0.6, 0.6), width=0.5,
@@ -105,7 +94,6 @@ def generate_cover_pages(exam, candidates) -> bytes:
         _ct(page, 156, '— CANDIDATE COVER PAGE — attach to front of answer script —',
             7, color=(0.6, 0.6, 0.6))
 
-        # ── QR code (left side) ───────────────────────────────────────────
         qr_size = 160
         qr_x = 60
         qr_y = 200
@@ -117,24 +105,20 @@ def generate_cover_pages(exam, candidates) -> bytes:
         _ct(page, qr_y + qr_size + 14, 'Scan to identify candidate',
             8, color=(0.5, 0.5, 0.5), x0=qr_x, x1=qr_x + qr_size)
 
-        # ── candidate number (right side, very large) ─────────────────────
         num_x = qr_x + qr_size + 40
         num_w = PAGE_W - num_x - 40
 
         _ct(page, 240, 'CANDIDATE NO.', 11, color=(0.4, 0.4, 0.4),
             x0=num_x, x1=num_x + num_w)
 
-        # Large candidate number
         _ct(page, 300, candidate.candidate_number, 36, fontname='hebo',
             color=(0.05, 0.05, 0.05), x0=num_x, x1=num_x + num_w)
 
-        # Student name
         student = candidate.student
         display_name = student.get_full_name() or student.username
         _ct(page, 330, display_name, 13, color=(0.2, 0.2, 0.2),
             x0=num_x, x1=num_x + num_w)
 
-        # ── instruction box ───────────────────────────────────────────────
         box_y = qr_y + qr_size + 50
         page.draw_rect(
             fitz.Rect(40, box_y, PAGE_W - 40, box_y + 90),
@@ -158,13 +142,9 @@ def generate_cover_pages(exam, candidates) -> bytes:
                 color=(0.1, 0.2, 0.5),
             )
 
-        # ── bottom border strip ───────────────────────────────────────────
         page.draw_rect(fitz.Rect(0, PAGE_H - 6, PAGE_W, PAGE_H), color=None, fill=(0.1, 0.3, 0.7))
 
     buf = io.BytesIO()
-    # deflate=False avoids compressed content streams that confuse basic
-    # printer interpreters. garbage=3 removes unreferenced objects.
-    # clean=True normalises content streams so every renderer agrees on layout.
     doc.save(buf, deflate=False, garbage=3, clean=True)
     doc.close()
     return buf.getvalue()

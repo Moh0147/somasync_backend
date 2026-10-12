@@ -19,14 +19,12 @@ from .exceptions import AIServiceResponseError, AIServiceUnavailableError
 from .models import AIExplanationRequest, MistakeExplanationCache
 from .services import OllamaAIService, get_ai_service
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class AIServiceConfigurationTests(TestCase):
     def test_default_configuration_uses_settings(self):
@@ -37,7 +35,7 @@ class AIServiceConfigurationTests(TestCase):
 
     def test_explicit_overrides_take_precedence_over_settings(self):
         service = OllamaAIService(base_url='http://custom:9999/', model='llama3', timeout=5)
-        self.assertEqual(service.base_url, 'http://custom:9999')  # trailing slash stripped
+        self.assertEqual(service.base_url, 'http://custom:9999')
         self.assertEqual(service.model, 'llama3')
         self.assertEqual(service.timeout, 5)
 
@@ -51,7 +49,6 @@ class AIServiceConfigurationTests(TestCase):
     def test_factory_returns_ollama_service_by_default(self):
         service = get_ai_service()
         self.assertIsInstance(service, OllamaAIService)
-
 
 class AIServiceConnectionFailureTests(TestCase):
     def setUp(self):
@@ -80,7 +77,6 @@ class AIServiceConnectionFailureTests(TestCase):
         mock_post.side_effect = requests.exceptions.RequestException('weird failure')
         with self.assertRaises(AIServiceUnavailableError):
             self.service.generate('Explain photosynthesis')
-
 
 class AIServiceResponseValidationTests(TestCase):
     def setUp(self):
@@ -122,7 +118,6 @@ class AIServiceResponseValidationTests(TestCase):
         with self.assertRaises(AIServiceResponseError):
             self.service.generate('Explain photosynthesis')
 
-
 class AIServiceHealthCheckTests(TestCase):
     def setUp(self):
         self.service = OllamaAIService(base_url='http://fake-ollama:11434', timeout=1)
@@ -148,14 +143,11 @@ class AIServiceHealthCheckTests(TestCase):
         self.assertFalse(self.service.health_check())
 
     def test_health_check_never_raises(self):
-        # No mocking -- fake-ollama:11434 genuinely can't be reached; this
-        # must return False, never propagate a connection exception.
         try:
             result = self.service.health_check()
         except Exception as exc:  # noqa: BLE001
             self.fail(f'health_check() raised {exc!r} instead of returning False')
         self.assertFalse(result)
-
 
 class AIHealthEndpointTests(TestCase):
     def setUp(self):
@@ -194,12 +186,10 @@ class AIHealthEndpointTests(TestCase):
         response = self.client.get('/api/ai/health/')
         self.assertEqual(set(response.data['data'].keys()), {'healthy'})
 
-
 def mock_ai_response(explanation='Because you swapped the signs.', correct_concept='Two negatives make a positive.', concise_feedback='Keep practicing!'):
     return Mock(text=json.dumps({
         'explanation': explanation, 'correct_concept': correct_concept, 'concise_feedback': concise_feedback,
     }))
-
 
 class ExplainMistakeTestBase(TestCase):
     def setUp(self):
@@ -258,7 +248,6 @@ class ExplainMistakeTestBase(TestCase):
         self.wrong_answer.refresh_from_db()
         self.right_answer.refresh_from_db()
 
-        # A second student makes the SAME mistake, for cache tests.
         self.attempt2 = StudentQuizAttempt.objects.create(
             school=self.school_a, quiz=self.quiz, student=self.student_a2, client_attempt_id='ai-attempt-2',
         )
@@ -273,7 +262,6 @@ class ExplainMistakeTestBase(TestCase):
         login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
-
 
 class SuccessfulExplanationTests(ExplainMistakeTestBase):
     def setUp(self):
@@ -299,8 +287,8 @@ class SuccessfulExplanationTests(ExplainMistakeTestBase):
 
         prompt = service.generate.call_args[0][0]
         self.assertIn('2+2=?', prompt)
-        self.assertIn('4', prompt)  # correct answer text
-        self.assertIn('3', prompt)  # student's wrong answer text
+        self.assertIn('4', prompt)
+        self.assertIn('3', prompt)
         self.assertIn('Mathematics', prompt)
 
     @patch('apps.ai.explanation_service.get_ai_service')
@@ -328,7 +316,6 @@ class SuccessfulExplanationTests(ExplainMistakeTestBase):
         response = self.client.post('/api/ai/explain-mistake/', {'student_answer': unmarked_answer.id})
         self.assertEqual(response.status_code, 400)
 
-
 class CachedExplanationTests(ExplainMistakeTestBase):
     @patch('apps.ai.explanation_service.get_ai_service')
     def test_second_students_identical_mistake_uses_cache(self, mock_get_service):
@@ -341,7 +328,6 @@ class CachedExplanationTests(ExplainMistakeTestBase):
 
         self.auth('ai_student_a2')
         r2 = self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer2.id})
-        # Same question, same wrong option -> served from cache, no second AI call.
         self.assertEqual(service.generate.call_count, 1)
 
         self.assertEqual(r1.data['data']['explanation'], r2.data['data']['explanation'])
@@ -367,7 +353,6 @@ class CachedExplanationTests(ExplainMistakeTestBase):
         cache_entry = MistakeExplanationCache.objects.get(question=self.question_wrong)
         self.assertEqual(cache_entry.hit_count, 1)
 
-
 class AIUnavailableTests(ExplainMistakeTestBase):
     def setUp(self):
         super().setUp()
@@ -377,7 +362,6 @@ class AIUnavailableTests(ExplainMistakeTestBase):
     def test_ai_unavailable_marks_request_failed_not_hard_error(self, mock_get_service):
         mock_get_service.return_value = Mock(generate=Mock(side_effect=AIServiceUnavailableError('down')))
         response = self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})
-        # AI must never block/hard-fail the request -- it's recorded FAILED, not a 5xx/400.
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['data']['status'], 'FAILED')
         self.assertTrue(response.data['data']['error'])
@@ -419,8 +403,7 @@ class AIUnavailableTests(ExplainMistakeTestBase):
 
         self.auth('ai_student_a2')
         response = self.client.post(f'/api/ai/explain-mistake/{request_id}/retry/')
-        self.assertEqual(response.status_code, 404)  # not visible to a different student
-
+        self.assertEqual(response.status_code, 404)
 
 class InvalidResponseTests(ExplainMistakeTestBase):
     def setUp(self):
@@ -436,7 +419,7 @@ class InvalidResponseTests(ExplainMistakeTestBase):
 
     @patch('apps.ai.explanation_service.get_ai_service')
     def test_missing_required_field_marks_failed(self, mock_get_service):
-        bad_text = json.dumps({'explanation': 'Some text', 'correct_concept': 'Some concept'})  # missing concise_feedback
+        bad_text = json.dumps({'explanation': 'Some text', 'correct_concept': 'Some concept'})
         mock_get_service.return_value = Mock(generate=Mock(return_value=Mock(text=bad_text)))
         response = self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})
         self.assertEqual(response.data['data']['status'], 'FAILED')
@@ -455,7 +438,6 @@ class InvalidResponseTests(ExplainMistakeTestBase):
         mock_get_service.return_value = Mock(generate=Mock(return_value=Mock(text='garbage')))
         self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})
         self.assertFalse(MistakeExplanationCache.objects.filter(question=self.question_wrong).exists())
-
 
 class AuthorizationTests(ExplainMistakeTestBase):
     def test_unauthenticated_cannot_request_explanation(self):
@@ -502,7 +484,6 @@ class AuthorizationTests(ExplainMistakeTestBase):
         response = self.client.get('/api/ai/explain-mistake/')
         self.assertEqual(response.data['data']['count'], 1)
 
-
 class ContextLengthLimitTests(ExplainMistakeTestBase):
     """Phase 20: `context` is free text echoed straight into an LLM prompt
     -- it must be bounded so a client can't force an oversized prompt onto
@@ -526,7 +507,6 @@ class ContextLengthLimitTests(ExplainMistakeTestBase):
         })
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.data['success'])
-
 
 @override_settings(THROTTLING_ENABLED=True)
 class AIRequestThrottleTests(ExplainMistakeTestBase):
@@ -555,11 +535,6 @@ class AIRequestThrottleTests(ExplainMistakeTestBase):
     @patch('apps.ai.explanation_service.get_ai_service')
     def test_throttled_after_limit_exceeded(self, mock_get_service):
         mock_get_service.return_value = Mock(generate=Mock(return_value=mock_ai_response()))
-        # 1st request succeeds normally; 2nd fails validation (already has
-        # a non-FAILED request for this answer) but still counts against
-        # the throttle since it reached the view. What matters here is
-        # only that the 3rd request is throttled, not what the first two
-        # returned.
         self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})
         self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})
         response = self.client.post('/api/ai/explain-mistake/', {'student_answer': self.wrong_answer.id})

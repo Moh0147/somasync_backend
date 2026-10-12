@@ -28,7 +28,6 @@ from .serializers import (
 )
 from .services import ensure_section_accessible, section_statuses_for_student, submit_section_quiz
 
-
 class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/lessons/ — school-owned. A teacher authors their own lessons;
     school/system admins have full oversight (edit or moderate anyone's).
@@ -98,8 +97,6 @@ class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSe
             raise ValidationError('Only a DRAFT lesson can be deleted — archive it instead.')
         instance.delete()
 
-    # --- publication workflow ---
-
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
         lesson = self.get_object()
@@ -118,8 +115,6 @@ class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSe
         lesson.status = Lesson.Status.ARCHIVED
         lesson.save(update_fields=['status', 'updated_at'])
         return api_response(data=self.get_serializer(lesson).data, message='Lesson archived')
-
-    # --- assign to class ---
 
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='assign')
     def assign(self, request, pk=None):
@@ -154,8 +149,6 @@ class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSe
         if not deleted:
             raise ValidationError('This lesson is not assigned to this class.')
         return api_response(message='Lesson unassigned from class')
-
-    # --- attachments ---
 
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='attachments', permission_classes=[IsAuthenticated])
     def attachments(self, request, pk=None):
@@ -206,8 +199,6 @@ class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSe
             message='Attachment uploaded', status=status.HTTP_201_CREATED,
         )
 
-    # --- mastery-based sections ---
-
     @action(detail=True, methods=['get'])
     def structure(self, request, pk=None):
         """GET /api/lessons/{id}/structure/ — the sectioned view of this
@@ -236,15 +227,12 @@ class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSe
             'sections': SectionStatusSerializer(rows, many=True).data,
         })
 
-    # --- helpers ---
-
     def _can_edit(self, user, lesson):
         if is_system_admin(user):
             return True
         if user.role == 'ADMIN' and user.school_id == lesson.school_id:
             return True
         return lesson.created_by_id == user.id
-
 
 class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.ModelViewSet):
     """/api/lessons/sections/?lesson=<id> — authoring (create/update/
@@ -269,9 +257,6 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
             return queryset
         if user.role == 'TEACHER':
             return queryset.filter(lesson__created_by=user)
-        # A student only ever reaches a section via `content`/`submit-quiz`
-        # (both call get_object() against this same queryset) — PUBLISHED
-        # is the one thing they're allowed to touch at all.
         return queryset.filter(lesson__status=Lesson.Status.PUBLISHED)
 
     def get_permissions(self):
@@ -305,8 +290,6 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
         if not self._can_edit(self.request.user, instance.lesson):
             raise PermissionDenied("Only this lesson's editor may manage its sections.")
         instance.delete()
-
-    # --- authoring: content blocks ---
 
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='content-blocks')
     def content_blocks(self, request, pk=None):
@@ -349,8 +332,6 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
             message='Content block added', status=status.HTTP_201_CREATED,
         )
 
-    # --- authoring: mini-quiz ---
-
     @action(detail=True, methods=['get', 'post'], url_path='mini-quiz')
     def mini_quiz(self, request, pk=None):
         section = self.get_object()
@@ -369,12 +350,6 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
         serializer = CreateSectionMiniQuizSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # A mini-quiz's Quiz is created here, not picked from existing
-        # quizzes -- it belongs 1:1 to this section, not a general-purpose
-        # reusable quiz. The teacher adds questions to it afterward via the
-        # normal /api/quizzes/questions/ endpoint, then publishes it via
-        # the normal /api/quizzes/{id}/publish/ -- submit_section_quiz()
-        # refuses to run against anything still DRAFT.
         quiz = Quiz.objects.create(
             school=section.school, subject=section.lesson.subject, class_level=section.lesson.class_level,
             title=f'{section.title} - Mini Quiz', created_by=request.user,
@@ -388,8 +363,6 @@ class LessonSectionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mo
             message="Mini-quiz created — add questions via /api/quizzes/questions/, then publish the quiz",
             status=status.HTTP_201_CREATED,
         )
-
-    # --- student-facing: content + submission ---
 
     @action(detail=True, methods=['get'])
     def content(self, request, pk=None):

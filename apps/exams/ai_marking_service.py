@@ -4,17 +4,12 @@ import re
 from apps.ai.exceptions import AIServiceError, AIServiceResponseError
 from apps.ai.services import get_ai_service
 
-# Matches a marking scheme criterion that encodes a sub-answer, e.g.:
-#   "(i) B — Problem identification"   → key="i"  expected="B"
-#   "(vii) C"                           → key="vii" expected="C"
-#   "3. D"                              → key="3"  expected="D"
 _SCHEME_ITEM_RE = re.compile(
     r'^\s*[\(\[]?\s*([ivxlcdmIVXLCDM]+|\d+|[a-zA-Z])\s*[\)\]]?\s*[.:\-]?\s*([A-Fa-f])\b',
 )
 _STUDENT_SUB_RE = re.compile(
     r'[\(\[]?\s*([ivxlcdmIVXLCDM]+|\d+|[a-zA-Z])\s*[\)\]]?\s*[.:\-]?\s*([A-Fa-f])\b',
 )
-
 
 def _try_deterministic_mark(exam_question, student_answer_text):
     """Return (marks, feedback) when every marking-scheme criterion encodes
@@ -28,11 +23,10 @@ def _try_deterministic_mark(exam_question, student_answer_text):
     for item in items:
         m = _SCHEME_ITEM_RE.match(item.criterion)
         if not m:
-            return None  # at least one item is descriptive — use AI
+            return None
         key = m.group(1).lower()
         scheme[key] = (m.group(2).upper(), float(item.marks))
 
-    # Parse sub-answers from the student's response
     student = {m.group(1).lower(): m.group(2).upper() for m in _STUDENT_SUB_RE.finditer(student_answer_text)}
 
     earned = 0.0
@@ -111,7 +105,6 @@ _FLAVOR_GENERAL = """\
 - Award a mark for a criterion when the student expresses the SAME IDEA or CONCEPT, even if worded differently.
 - Ignore introductory sentences that merely restate the question."""
 
-
 def _detect_flavor(exam_question):
     """Return ('transformation'|'essay'|'literature'|'general', item_marks, inferred)."""
     section = (exam_question.section or '').upper()
@@ -121,7 +114,6 @@ def _detect_flavor(exam_question):
         return 'literature', None, False
 
     if exam_question.question_type == 'SUBJECTIVE' and items:
-        # Transformation: all items have the same marks and roman/digit key patterns
         sub_pattern = re.compile(r'^\s*[\(\[]?\s*([ivxlcdmIVXLCDM]+|\d+)\s*[\)\]]?\s*$')
         all_sub = all(sub_pattern.match(item.criterion.strip()) for item in items)
         all_same_marks = len({item.marks for item in items}) == 1
@@ -129,12 +121,10 @@ def _detect_flavor(exam_question):
             inferred = any(getattr(item, 'marks_source', 'confirmed') == 'inferred' for item in items)
             return 'transformation', items[0].marks, inferred
 
-        # Essay / rubric: 3+ diverse criteria
         if len(items) >= 3:
             return 'essay', None, False
 
     return 'general', None, False
-
 
 def _build_prompt(exam_question, student_answer_text):
     items = exam_question.marking_scheme_items.all()
@@ -175,7 +165,6 @@ def _build_prompt(exam_question, student_answer_text):
         flavor_instructions=flavor_instructions,
     )
 
-
 def _extract_json_block(text):
     """Strips a markdown code fence if the model wrapped its JSON in one
     despite instructions not to — a common real-world LLM quirk (same
@@ -186,7 +175,6 @@ def _extract_json_block(text):
         if text.rstrip().endswith('```'):
             text = text.rstrip()[:-3]
     return text.strip()
-
 
 def _parse_response(text, max_marks):
     try:
@@ -207,7 +195,6 @@ def _parse_response(text, max_marks):
         raise AIServiceResponseError('AI response missing feedback text.')
 
     return {'marks_awarded': marks_awarded, 'feedback': feedback.strip()}
-
 
 class ExamAIMarkingService:
     """AI-assisted marking of SUBJECTIVE exam answers via the configured
@@ -247,6 +234,5 @@ class ExamAIMarkingService:
         answer.ai_feedback = parsed['feedback']
         answer.save(update_fields=['ai_marks_awarded', 'ai_feedback'])
         return answer
-
 
 __all__ = ['ExamAIMarkingService', 'AIServiceError']

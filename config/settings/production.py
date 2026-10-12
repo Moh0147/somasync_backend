@@ -9,10 +9,6 @@ DEBUG = False
 if not ALLOWED_HOSTS:  # noqa: F405
     raise ImproperlyConfigured('ALLOWED_HOSTS must be set via the environment in production.')
 
-# SECRET_KEY also signs every JWT (SIMPLE_JWT has no separate SIGNING_KEY
-# configured, so it falls back to this). RFC 7518 recommends at least 32
-# bytes for HS256 -- refuse to boot on the .env.example placeholder or on
-# anything shorter, rather than silently signing tokens with a weak key.
 if SECRET_KEY == 'change-me' or len(SECRET_KEY) < 32:  # noqa: F405
     raise ImproperlyConfigured(
         'SECRET_KEY must be a strong, unique value (32+ chars) in production -- '

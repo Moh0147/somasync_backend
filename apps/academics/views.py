@@ -10,7 +10,6 @@ from .serializers import (
     ClassLevelSerializer, LearningObjectiveSerializer, SubjectSerializer, TopicSerializer,
 )
 
-
 class ClassLevelViewSet(EnvelopeMixin, viewsets.ModelViewSet):
     """/api/academics/class-levels/ — global reference data (Form I-IV,
     extensible), not tenant-scoped. Readable by anyone authenticated;
@@ -26,7 +25,6 @@ class ClassLevelViewSet(EnvelopeMixin, viewsets.ModelViewSet):
         if self.action in ('create', 'update', 'partial_update'):
             return [IsAuthenticated(), IsSystemAdmin()]
         return [IsAuthenticated()]
-
 
 class SubjectViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/academics/subjects/ — school-owned. A system/school admin
@@ -55,7 +53,6 @@ class SubjectViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewS
         self._validate_unique_name(school, name, exclude_pk=serializer.instance.pk)
         serializer.save(school=school)
 
-
 class TopicViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/academics/topics/ — school-owned, each topic tied to a
     (subject, class_level) pair. The referenced subject must belong to the
@@ -80,7 +77,6 @@ class TopicViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet
         subject = serializer.validated_data.get('subject', serializer.instance.subject)
         self._validate_subject_school(school, subject)
         serializer.save(school=school)
-
 
 class LearningObjectiveViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/academics/learning-objectives/ — school-owned, each objective

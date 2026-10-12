@@ -25,7 +25,6 @@ from .serializers import (
 )
 from .serializers import SafeQuestionSerializer
 
-
 class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/quizzes/ — school-owned. A teacher authors their own quizzes;
     school/system admins have full oversight. Visibility mirrors Lesson:
@@ -48,10 +47,6 @@ class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return queryset
         if user.role == 'TEACHER':
             return queryset.filter(Q(status=Quiz.Status.PUBLISHED) | Q(created_by=user))
-        # Students see only published *normal* quizzes. Section mini-quizzes
-        # are embedded in their lesson sections and must not appear in this
-        # list (nor be opened through the normal quiz flow): they use the
-        # lesson's section gating instead of QuizAssignment.
         return queryset.filter(status=Quiz.Status.PUBLISHED, section_mini_quiz__isnull=True)
 
     def get_permissions(self):
@@ -199,7 +194,6 @@ class QuizViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             raise ValidationError('This quiz is not assigned to this class.')
         return api_response(message='Quiz unassigned from class')
 
-
 class QuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.ModelViewSet):
     """/api/quizzes/questions/?quiz=<id> — authoring-only. NEVER exposed to
     students in this phase: it reveals is_correct / the answer key. A
@@ -316,7 +310,6 @@ class QuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.ModelVi
             data=MatchingPairSerializer(pair).data, message='Pair added', status=status.HTTP_201_CREATED,
         )
 
-
 class StudentQuizAttemptViewSet(
     EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet,
 ):
@@ -350,8 +343,6 @@ class StudentQuizAttemptViewSet(
         if user.role == 'STUDENT':
             return queryset.filter(student=user)
         return queryset.none()
-
-    # --- live flow ---
 
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated, IsStudent])
     def start(self, request):
@@ -403,8 +394,6 @@ class StudentQuizAttemptViewSet(
         attempt.save(update_fields=['status', 'submitted_at', 'updated_at'])
         attempt = QuizMarkingService.mark_attempt(attempt)
         return api_response(data=self.get_serializer(attempt).data, message='Attempt submitted')
-
-    # --- offline batch sync ---
 
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated, IsStudent])
     def sync(self, request):

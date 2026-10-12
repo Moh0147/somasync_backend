@@ -14,7 +14,6 @@ from .serializers import SchoolAdminCreateSerializer, SchoolSerializer, StudentC
 
 User = get_user_model()
 
-
 class SchoolViewSet(EnvelopeMixin, viewsets.ModelViewSet):
     """/api/schools/
 
@@ -28,8 +27,6 @@ class SchoolViewSet(EnvelopeMixin, viewsets.ModelViewSet):
 
     serializer_class = SchoolSerializer
     permission_classes = [IsAuthenticated, IsOwnSchool]
-    # No PUT (partial updates only) and no hard DELETE — schools are
-    # deactivated via the explicit `deactivate` action instead.
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     success_messages = {'create': 'School created', 'update': 'School updated'}
 
@@ -60,9 +57,6 @@ class SchoolViewSet(EnvelopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get', 'post'], url_path='admins', permission_classes=[IsAuthenticated])
     def admins(self, request, pk=None):
-        # get_object() applies get_queryset()'s tenant scoping, so a user
-        # from another school gets a 404 here, never a 403 that would
-        # confirm the school exists.
         school = self.get_object()
 
         if request.method == 'POST':
@@ -84,10 +78,6 @@ class SchoolViewSet(EnvelopeMixin, viewsets.ModelViewSet):
         return api_response(data=UserSerializer(admins_qs, many=True).data)
 
     def _handle_staff_action(self, request, role, create_serializer_class, role_label):
-        # Shared by teachers()/students() below -- identical shape to
-        # admins() except who's allowed to POST: a school's own SCHOOL
-        # admin may provision teacher/student accounts for their own
-        # school, not just a system admin (unlike creating another admin).
         school = self.get_object()
         is_own_school_admin = request.user.role == User.Role.ADMIN and request.user.school_id == school.id
 

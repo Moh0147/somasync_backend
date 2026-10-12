@@ -4,7 +4,6 @@ from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
-
 class LessonProgress(models.Model):
     """A student's progress through a lesson. `last_accessed_at` is
     client-settable (not auto_now) — offline-first: a student may report
@@ -12,8 +11,6 @@ class LessonProgress(models.Model):
     so it's the client's own timestamp, while `updated_at` is the server's
     own record of when this row was last written."""
 
-    # Denormalized from lesson.school, consistent with the tenant-scoping
-    # pattern used throughout (Topic, Lesson, Quiz, Question, ...).
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='lesson_progress')
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='lesson_progress',
@@ -31,9 +28,6 @@ class LessonProgress(models.Model):
         ]
         ordering = ['-updated_at']
         indexes = [
-            # Backs the sync-pull hot path: "this student's progress
-            # updated since <timestamp>" -- the exact query a student
-            # catching up after being offline for days runs.
             models.Index(fields=['student', 'updated_at'], name='lessonprog_stu_upd_idx'),
         ]
 

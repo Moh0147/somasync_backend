@@ -12,7 +12,6 @@ from .models import SyncRecord
 from .registry import PULL_HANDLERS, PUSH_HANDLERS
 from .serializers import PushRequestSerializer
 
-
 class SyncPushView(views.APIView):
     """POST /api/sync/push/ — batched, idempotent push of offline-generated
     changes. Every item is tracked by a SyncRecord keyed on
@@ -65,20 +64,10 @@ class SyncPushView(views.APIView):
         )
 
         if not created and record.status == SyncRecord.Status.SYNCED:
-            # Idempotent short-circuit: already processed, don't redo it
-            # (and don't re-run business logic that may not be safely
-            # re-runnable for every future entity type).
             return {'client_id': client_id, 'status': record.status}
 
         record.attempts += 1
 
-        # The handler call is its own savepoint: if it raises (a DB error,
-        # not just a business-logic failure -- those come back as a plain
-        # `success=False` and are a normal, committed outcome), the DB
-        # session must be rolled back to a clean state -- caught *outside*
-        # this block, not inside it -- before the record.save() below,
-        # otherwise that save would run inside an already-aborted
-        # transaction and fail too.
         try:
             with transaction.atomic():
                 success, _result_data, error = handler(user, client_id, data)
@@ -95,7 +84,6 @@ class SyncPushView(views.APIView):
         if not success:
             result['error'] = error
         return result
-
 
 class SyncPullView(views.APIView):
     """GET /api/sync/pull/?since=<ISO timestamp>&entity_type=<optional>

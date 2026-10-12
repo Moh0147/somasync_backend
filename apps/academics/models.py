@@ -1,7 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
-
 class ClassLevel(models.Model):
     """A national curriculum level (Form I, Form II, ...). This is shared
     reference data, NOT school-scoped — Form I means the same thing at every
@@ -18,7 +17,6 @@ class ClassLevel(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class Subject(models.Model):
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='subjects')
@@ -40,7 +38,6 @@ class Subject(models.Model):
 
     def __str__(self):
         return f'{self.name} ({self.school.code})'
-
 
 class Topic(models.Model):
     """A topic belongs to a (Subject, ClassLevel) pair: e.g. "Algebra" under
@@ -74,7 +71,6 @@ class Topic(models.Model):
 
     def __str__(self):
         return f'{self.subject.name} / {self.class_level.name} / {self.title}'
-
 
 class LearningObjective(models.Model):
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='learning_objectives')

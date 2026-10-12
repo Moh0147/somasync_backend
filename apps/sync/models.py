@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
 
-
 class SyncRecord(models.Model):
     """Tracks the sync status of one pushed item, keyed by
     (user, entity_type, client_id) — the idempotency boundary. A push of

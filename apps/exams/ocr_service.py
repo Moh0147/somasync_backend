@@ -4,7 +4,6 @@ import json
 import os
 import re
 
-
 def extract_pages_as_png(file_obj) -> list[bytes]:
     """Render every page of a script file as a PNG byte string.
 
@@ -19,20 +18,17 @@ def extract_pages_as_png(file_obj) -> list[bytes]:
     file_obj.seek(0)
     data = file_obj.read()
 
-    # Single-image uploads: wrap the raw bytes directly.
     is_png  = data[:8].startswith(b'\x89PNG')
     is_jpeg = data[:2] == b'\xff\xd8'
     if is_png or is_jpeg:
         return [data]
 
-    # PDF: render each page.
     document = fitz.open(stream=data, filetype='pdf')
     pages = []
     for page in document:
         pix = page.get_pixmap(matrix=fitz.Matrix(150 / 72, 150 / 72), alpha=False)
         pages.append(pix.tobytes('png'))
     return pages
-
 
 _VISION_MAP_PROMPT = """\
 This is an exam script page. The student has written answers to the questions below.
@@ -50,7 +46,6 @@ answer text (string value).
 
 Example: {{"1": "Photosynthesis is...", "2": "Carbon", "3": ""}}
 """
-
 
 def vision_extract_answers(file_obj, questions) -> dict:
     """Combine OCR + answer mapping in one vision-model call per page.
@@ -116,7 +111,6 @@ def vision_extract_answers(file_obj, questions) -> dict:
             continue
 
         try:
-            # Strip markdown code fences if present
             text = raw_json.strip()
             if text.startswith('```'):
                 text = text.split('\n', 1)[1] if '\n' in text else text
@@ -132,8 +126,6 @@ def vision_extract_answers(file_obj, questions) -> dict:
                 new_part = answer.strip()
                 existing = all_answers.get(q.id, '')
                 if existing:
-                    # Answer spans multiple pages — concatenate page continuations.
-                    # Skip if the new part is already contained in existing (avoid duplication).
                     if new_part not in existing:
                         all_answers[q.id] = existing + '\n' + new_part
                 else:
@@ -142,7 +134,6 @@ def vision_extract_answers(file_obj, questions) -> dict:
             pass
 
     return all_answers
-
 
 def _gpt4o_vision_map(image_bytes: bytes, prompt: str, api_key: str) -> str:
     """Send image + prompt to GPT-4o and return raw text response."""
@@ -159,10 +150,9 @@ def _gpt4o_vision_map(image_bytes: bytes, prompt: str, api_key: str) -> str:
                 {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{b64}', 'detail': 'high'}},
             ],
         }],
-        max_tokens=4096,
+        max_tokens=16000,
     )
     return response.choices[0].message.content.strip()
-
 
 def _gpt4o_ocr_page(image_bytes: bytes) -> str:
     """Send a page image to GPT-4o Vision and return the transcribed text."""
@@ -199,7 +189,6 @@ def _gpt4o_ocr_page(image_bytes: bytes) -> str:
     )
     return response.choices[0].message.content.strip()
 
-
 def extract_script(file_obj):
     try:
         import fitz
@@ -221,8 +210,6 @@ def extract_script(file_obj):
             pages.append(text)
             continue
 
-        # Scanned / camera-captured page — use GPT-4o Vision if key is set,
-        # otherwise fall back to pytesseract.
         rect = page.rect
         is_camera_scan = rect.width > 900 or rect.height > 900
         scale = 1.0 if is_camera_scan else 2.0
@@ -234,17 +221,14 @@ def extract_script(file_obj):
                 text = _gpt4o_ocr_page(png_bytes)
                 ocr_used = True
             except Exception:
-                # GPT-4o failed (no credits, network) — try Ollama vision next
                 text = _ollama_ocr_page(png_bytes) or _pytesseract_ocr(pix)
                 ocr_used = True
         else:
-            # No GPT-4o key — try Ollama vision, then pytesseract
             text = _ollama_ocr_page(png_bytes) or _pytesseract_ocr(pix)
             ocr_used = True
 
         pages.append(text)
     return '\n\n'.join(p for p in pages if p), ('OCR' if ocr_used else 'TEXT')
-
 
 def _ollama_ocr_page(image_bytes: bytes) -> str:
     """Use Ollama vision model (gemma3:4b) to transcribe a page image.
@@ -260,7 +244,6 @@ def _ollama_ocr_page(image_bytes: bytes) -> str:
     except Exception:
         return ''
 
-
 def _pytesseract_ocr(pix) -> str:
     try:
         import pytesseract
@@ -269,7 +252,6 @@ def _pytesseract_ocr(pix) -> str:
         return pytesseract.image_to_string(image).strip()
     except ImportError as exc:
         raise RuntimeError('Scanned PDF detected. Install Tesseract OCR plus Pillow and pytesseract.') from exc
-
 
 def map_answers(text, questions):
     """Extract per-question answers from raw OCR text.
@@ -286,7 +268,6 @@ def map_answers(text, questions):
 
     result = _header_map_answers(text, ordered)
     if result:
-        # Supplement any gaps with regex before returning.
         missing = [q for q in ordered if q.id not in result]
         if missing:
             result.update(_regex_map_answers(text, missing))
@@ -294,8 +275,6 @@ def map_answers(text, questions):
 
     try:
         ai_result = _ai_map_answers(text, ordered)
-        # AI may return empty strings for short or ambiguous answers.
-        # Run regex on every question AI left unanswered so nothing is lost.
         missing = [q for q in ordered if q.id not in ai_result]
         if missing:
             ai_result.update(_regex_map_answers(text, missing))
@@ -305,16 +284,9 @@ def map_answers(text, questions):
 
     return _regex_map_answers(text, ordered)
 
-
-# ── 1. Header-based split ──────────────────────────────────────────────────
-
-# Matches a line that contains ONLY a question label such as:
-#   "Question 1"  "QUESTION 3"  "Q 4"  "Q4"
-# Captured group 1 = the numeric part.
 _HEADER_RE = re.compile(
     r'(?im)^\s*(?:question|q)\s*(\d+)\s*$'
 )
-
 
 def _header_map_answers(text, ordered_questions):
     """Split the script on standalone question-header lines.
@@ -324,8 +296,6 @@ def _header_map_answers(text, ordered_questions):
     that also carries a "Question" / "Q" prefix.
     Returns {} when no such headers are found."""
     parts = _HEADER_RE.split(text)
-    # After split with one capturing group:
-    #   parts = [pre_text, "1", body_of_Q1, "2", body_of_Q2, ...]
     if len(parts) < 3:
         return {}
 
@@ -338,9 +308,6 @@ def _header_map_answers(text, ordered_questions):
         if q and body:
             answers[q.id] = body
     return answers
-
-
-# ── 2. AI extraction ───────────────────────────────────────────────────────
 
 _EXTRACTION_PROMPT = """\
 You are processing an OCR-scanned exam script. Extract the student's answer for \
@@ -370,7 +337,6 @@ Example output for questions 1, 2, 3:
 {{"1": "Photosynthesis is the process...", "2": "Carbon", "3": ""}}
 """
 
-
 def _ai_map_answers(text, ordered_questions):
     from apps.ai.services import get_ai_service
 
@@ -379,7 +345,7 @@ def _ai_map_answers(text, ordered_questions):
         for q in ordered_questions
     )
     prompt = _EXTRACTION_PROMPT.format(text=text, question_list=question_list)
-    result = get_ai_service().generate(prompt, num_predict=4000)
+    result = get_ai_service().generate(prompt, num_predict=8000)
     raw = result.text.strip()
 
     if raw.startswith('```'):
@@ -397,9 +363,6 @@ def _ai_map_answers(text, ordered_questions):
         if isinstance(value, str) and value.strip():
             answers[q.id] = value.strip()
     return answers
-
-
-# ── 3. Regex fallback ──────────────────────────────────────────────────────
 
 def _regex_map_answers(text, ordered_questions):
     """Last-resort regex. Uses [.):] only as separators (not whitespace) to

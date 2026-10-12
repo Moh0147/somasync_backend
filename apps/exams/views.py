@@ -41,7 +41,6 @@ from .serializers import (
 
 User = get_user_model()
 
-
 class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/exams/ — school-owned. A teacher authors their own exams;
     school/system admins have full oversight. Authoring-only: exams are
@@ -55,8 +54,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
 
     def get_queryset(self):
         user = self.request.user
-        # Cross-school EXAM_MARKING_MANAGER has no school: bypass tenant scoping
-        # BEFORE calling super(), which would otherwise filter school=None → empty.
         if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
             return Exam.objects.select_related('school', 'subject', 'class_level', 'created_by')
         queryset = super().get_queryset()
@@ -66,7 +63,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             return queryset.filter(created_by=user)
         if user.role in MARKING_READ_ROLES:
             qs = queryset.filter(school=user.school)
-            # EXAMINER sees only active-marking-lifecycle exams at their school.
             if user.role == 'EXAMINER':
                 qs = qs.filter(status__in=[
                     Exam.Status.MARKING, Exam.Status.REVIEW,
@@ -79,12 +75,8 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         if self.action == 'create':
             return [IsAuthenticated(), (IsAdmin | IsTeacher)()]
         if self.action == 'scripts':
-            # GET (list): marking roles can view; queryset scoping enforces isolation.
-            # POST (upload): owner, school admin, OR exam marking manager — checked inline.
             return [IsAuthenticated()]
         if self.action == 'start_marking':
-            # EXAM_MARKING_MANAGER may start marking for exams in their school;
-            # full eligibility check is performed inline in the action.
             return [IsAuthenticated()]
         if self.action in (
             'update', 'partial_update', 'destroy', 'publish', 'close', 'candidates', 'attempts',
@@ -269,7 +261,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
         exam.save(update_fields=['status', 'updated_at'])
         return api_response(data=self.get_serializer(exam).data, message='Marking started')
 
-
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='candidates')
     def candidates(self, request, pk=None):
         exam = self.get_object()
@@ -371,8 +362,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             exam=exam, file=uploaded, file_name=uploaded.name, extracted_text=text,
             source_type='EXAM_PAPER', uploaded_by=request.user,
         )
-        # Only import explicit question headings. This avoids mistaking page
-        # headers, durations, table cells and footer numbers for questions.
         created = []
         existing = {q.question_number for q in exam.questions.all()}
         heading = re.compile(r'(?im)^\s*question\s+(\d+(?:\s*\([a-z]\))?)\s*(?:\((\d+(?:\.\d+)?)\s*marks?\))?\s*$')
@@ -430,9 +419,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
                 question.save(update_fields=['max_marks', 'updated_at'])
             block = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
             lines = [line.strip() for line in block.splitlines() if line.strip()]
-            # Extract numbered marking points whose following numeric line is
-            # the awarded mark. This handles the NEC table layout produced by
-            # PDF text extraction without trusting page/table coordinates.
             for point_index, line in enumerate(lines):
                 if not re.fullmatch(r'\d+', line):
                     continue
@@ -497,8 +483,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
 
         student = candidate.student
         school = exam.school
-        # Defense in depth — Phase 14's ExamCandidate.clean() should
-        # already guarantee this, but never trust a chain of assumptions.
         if student.school_id != school.id:
             raise ValidationError({'candidate_number': 'Candidate/student/school mismatch.'})
 
@@ -531,13 +515,9 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             candidate=candidate,
             defaults={'school': school, 'exam': exam, 'student': student, 'current_script': script},
         )
-        # A placeholder answer row per question -- scaffolding for Phase
-        # 16's marking engine, not populated with content here.
         for exam_question in exam.questions.all():
             StudentExamAnswer.objects.get_or_create(attempt=attempt, exam_question=exam_question)
 
-        # When an EXAMINER uploads their own script they are automatically
-        # assigned to it so they can immediately proceed to OCR and marking.
         if _is_examiner:
             ExamScriptAssignment.objects.get_or_create(
                 script=script,
@@ -612,7 +592,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             .order_by('-updated_at')
         )
 
-        # Single aggregation: count scripts grouped by (exam_id, status).
         from django.db.models import Q
         script_counts = (
             ExamScript.objects
@@ -662,7 +641,6 @@ class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet)
             data={'exam': self.get_serializer(exam).data, 'published_count': len(finalized_scripts)},
             message=f'Published {len(finalized_scripts)} result(s)',
         )
-
 
 class ExamQuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.ModelViewSet):
     """/api/exams/questions/?exam=<id> — authoring-only, mirrors
@@ -793,7 +771,6 @@ class ExamQuestionViewSet(EnvelopeMixin, TenantScopedQuerysetMixin, viewsets.Mod
             status=status.HTTP_201_CREATED,
         )
 
-
 class StudentExamAnswerViewSet(
     EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet,
 ):
@@ -825,7 +802,7 @@ class StudentExamAnswerViewSet(
             return queryset.filter(attempt__exam__created_by=user)
         if user.role in MARKING_READ_ROLES:
             if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
-                qs = queryset  # cross-school oversight
+                qs = queryset
             else:
                 qs = queryset.filter(attempt__school_id=user.school_id)
             return qs
@@ -833,7 +810,6 @@ class StudentExamAnswerViewSet(
 
     def _can_mark(self, user, answer):
         exam = answer.attempt.exam
-        # System admin explicitly excluded from routine marking ops.
         if is_system_admin(user):
             return False
         if user.role == 'ADMIN' and user.school_id == exam.school_id:
@@ -892,7 +868,6 @@ class StudentExamAnswerViewSet(
         )
         return api_response(data=self.get_serializer(answer).data, message='Answer marked')
 
-
 def _extract_and_save_pages(script: ExamScript) -> None:
     """Render each page of `script.file` as a PNG and store as ExamScriptPage rows.
 
@@ -912,7 +887,6 @@ def _extract_and_save_pages(script: ExamScript) -> None:
         filename = f'{candidate_num}_v{script.version}_p{i}.png'
         page = ExamScriptPage(script=script, page_number=i)
         page.image.save(filename, ContentFile(png_bytes), save=True)
-
 
 class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """/api/exams/scripts/ — drives ExamScript through
@@ -939,17 +913,16 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         queryset = super().get_queryset()
         user = self.request.user
         if is_system_admin(user):
-            return queryset  # read-only oversight; _can_manage blocks state ops
+            return queryset
         if user.role == 'ADMIN':
             return queryset.filter(school_id=user.school_id)
         if user.role == 'TEACHER':
             return queryset.filter(exam__created_by=user)
         if user.role in MARKING_READ_ROLES:
             if user.role == 'EXAM_MARKING_MANAGER' and not user.school_id:
-                qs = queryset  # cross-school oversight
+                qs = queryset
             else:
                 qs = queryset.filter(school_id=user.school_id)
-            # Optional filters — useful for the "My Scripts" list page.
             exam_id = self.request.query_params.get('exam')
             status_filter = self.request.query_params.get('status')
             if exam_id:
@@ -961,19 +934,14 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
 
     def _can_manage(self, user, script):
         exam = script.exam
-        # System admin: never authorised for routine marking ops.
         if is_system_admin(user):
             return False
-        # School admin: fallback oversight when EXAM_MARKING_MANAGER not yet deployed.
         if user.role == 'ADMIN' and user.admin_scope == 'SCHOOL' and user.school_id == exam.school_id:
             return True
-        # Teacher who created the exam.
         if user.role == 'TEACHER' and exam.created_by_id == user.id:
             return True
-        # EXAM_MARKING_MANAGER: cross-school (null) or school-scoped.
         if user.role == 'EXAM_MARKING_MANAGER':
             return not user.school_id or user.school_id == exam.school_id
-        # EXAMINER: any script for a MARKING exam at their school.
         if user.role == 'EXAMINER':
             return (
                 user.school_id == exam.school_id
@@ -989,7 +957,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         if not self._can_manage(request.user, script):
             raise PermissionDenied("Only this exam's editor may run OCR.")
 
-        # Backfill pages for scripts uploaded before the page-extraction feature.
         if not script.pages.exists():
             _extract_and_save_pages(script)
 
@@ -999,8 +966,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
 
         questions = script.exam.questions.all()
 
-        # Step 1a — vision-combined: OCR + mapping in one model call per page.
-        # Avoids mis-attribution caused by question headers appearing out of order.
         mapped: dict = {}
         text = ''
         method = 'OCR'
@@ -1009,21 +974,23 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         except Exception:
             pass
 
-        # Step 1b — fallback: classic OCR then separate mapping.
-        if not mapped:
+        unmapped_questions = [q for q in questions if q.id not in mapped]
+        if unmapped_questions:
             try:
                 text, method = extract_script(script.file.file)
             except Exception as exc:
-                script.ocr_status = ExamScript.OCRStatus.FAILED
-                script.ocr_error = str(exc)
-                script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
-                raise ValidationError({'ocr': str(exc)})
-            try:
-                mapped = map_answers(text, questions)
-            except Exception:
-                pass
+                if not mapped:
+                    script.ocr_status = ExamScript.OCRStatus.FAILED
+                    script.ocr_error = str(exc)
+                    script.save(update_fields=['ocr_status', 'ocr_error', 'updated_at'])
+                    raise ValidationError({'ocr': str(exc)})
+            if text:
+                try:
+                    fallback = map_answers(text, unmapped_questions)
+                    mapped.update(fallback)
+                except Exception:
+                    pass
 
-        # Step 2 — persist mapped answers (best-effort).
         mapping_warning = ''
         try:
             attempt = script.candidate.attempt
@@ -1038,8 +1005,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script.extracted_text = text
         script.ocr_status = ExamScript.OCRStatus.READY
         script.ocr_error = f'Answer mapping partial: {mapping_warning}' if mapping_warning else ''
-        # Reset script status so a previously-FAILED script can proceed
-        # through AI marking again cleanly after re-extraction.
         if script.status == ExamScript.Status.FAILED:
             script.status = ExamScript.Status.UPLOADED
         script.save(update_fields=['extracted_text', 'ocr_status', 'ocr_error', 'status', 'updated_at'])
@@ -1070,7 +1035,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         errors = []
         for answer in subjective_answers:
             if not answer.recorded_answer:
-                # Blank answer — student left it empty or OCR missed it; skip silently.
                 continue
             try:
                 ExamAIMarkingService.mark_answer(answer)
@@ -1115,9 +1079,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
                 'Only a MARKED, UPLOADED, or FAILED script can be submitted for teacher review.',
             )
 
-        # When coming from UPLOADED (AI was never involved), require every
-        # answer to already have teacher_final_marks — otherwise the examiner
-        # simply hasn't started marking yet and submit_for_review must block.
         if script.status == ExamScript.Status.UPLOADED:
             unmarked_count = script.candidate.attempt.answers.filter(teacher_final_marks__isnull=True).count()
             if unmarked_count:
@@ -1164,9 +1125,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         answers = list(attempt.answers.select_related('exam_question'))
         section_rules = script.exam.section_settings or {}
 
-        # Auto-zero questions the student left blank that are either:
-        #   • in a section with a choice rule (e.g. "Section C": 2)
-        #   • individually flagged as non-compulsory
         auto_zeroed_ids = set()
         for a in answers:
             q = a.exam_question
@@ -1191,8 +1149,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script.status = ExamScript.Status.FINALIZED
         script.save(update_fields=['status', 'updated_at'])
 
-        # Exclude auto-zeroed unanswered choice questions from the denominator
-        # so the percentage is out of the marks actually available to this student.
         total_marks = sum(a.exam_question.max_marks for a in answers if a.id not in auto_zeroed_ids)
         score = sum((a.teacher_final_marks for a in answers), Decimal('0'))
         percentage = (score / total_marks * 100) if total_marks else Decimal('0')
@@ -1344,7 +1300,6 @@ class ExamScriptViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
         script.save(update_fields=['status', 'updated_at'])
         return api_response(data=self.get_serializer(script).data, message='Script published')
 
-
 class ExamResultViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """/api/exams/results/ — STUDENT-FACING, the first (and only) point in
     the whole exam module where a student gets any read access at all.
@@ -1369,7 +1324,6 @@ class ExamResultViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveMod
             student=self.request.user, current_script__status=ExamScript.Status.PUBLISHED,
         ).select_related('exam', 'candidate', 'current_script').prefetch_related('answers__exam_question')
 
-
 class AuditLogViewSet(
     EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet,
 ):
@@ -1384,7 +1338,7 @@ class AuditLogViewSet(
         user = self.request.user
         queryset = MarkingAuditLog.objects.select_related('exam', 'script__candidate', 'actor')
         if is_system_admin(user):
-            pass  # full visibility
+            pass
         elif user.role == 'EXAM_MARKING_MANAGER':
             queryset = queryset.filter(exam__school_id=user.school_id)
         else:
@@ -1408,5 +1362,4 @@ class AuditLogViewSet(
             queryset = queryset.filter(actor_username__icontains=actor_username)
 
         return queryset
-
 

@@ -6,14 +6,12 @@ from apps.schools.models import School
 
 from .models import ClassLevel, LearningObjective, Subject, Topic
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class AcademicsTestBase(TestCase):
     def setUp(self):
@@ -38,7 +36,6 @@ class AcademicsTestBase(TestCase):
         login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
-
 
 class ClassLevelTests(AcademicsTestBase):
     def test_seed_data_has_four_forms(self):
@@ -67,7 +64,6 @@ class ClassLevelTests(AcademicsTestBase):
         self.auth('ac_admin_a')
         response = self.client.post('/api/academics/class-levels/', {'name': 'Form V', 'code': 'F5', 'order': 5})
         self.assertEqual(response.status_code, 403)
-
 
 class SubjectTests(AcademicsTestBase):
     def test_system_admin_can_create_subject_for_any_school(self):
@@ -169,7 +165,6 @@ class SubjectTests(AcademicsTestBase):
         response = self.client.delete(f'/api/academics/subjects/{subject_b.id}/')
         self.assertEqual(response.status_code, 404)
 
-
 class TopicTests(AcademicsTestBase):
     def setUp(self):
         super().setUp()
@@ -235,7 +230,6 @@ class TopicTests(AcademicsTestBase):
         self.auth('ac_admin_a')
         response = self.client.delete(f'/api/academics/topics/{topic_b.id}/')
         self.assertEqual(response.status_code, 404)
-
 
 class LearningObjectiveTests(AcademicsTestBase):
     def setUp(self):

@@ -5,7 +5,6 @@ from apps.ai.exceptions import AIServiceResponseError, AIServiceUnavailableError
 
 from .base import AIService, AIServiceResponse
 
-
 class OllamaAIService(AIService):
     """Talks to a local Ollama server's /api/generate endpoint. Configured
     entirely via settings (OLLAMA_BASE_URL, OLLAMA_MODEL,
@@ -17,10 +16,6 @@ class OllamaAIService(AIService):
         self.timeout = timeout if timeout is not None else settings.OLLAMA_TIMEOUT_SECONDS
 
     def generate(self, prompt, *, system=None, timeout=None, num_predict=None, temperature=None):
-        # Default is kept short for the phone-sized explanation card. Callers
-        # that need longer output (e.g. answer extraction) pass num_predict
-        # explicitly.
-        # temperature=0 is required for exam marking (deterministic scores).
         payload = {
             'model': self.model,
             'prompt': prompt,

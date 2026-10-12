@@ -18,14 +18,12 @@ from .models import (
     StudentExamAnswer, StudentExamAttempt,
 )
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class ExamsTestBase(TestCase):
     def setUp(self):
@@ -81,7 +79,6 @@ class ExamsTestBase(TestCase):
         }
         payload.update(overrides)
         return self.client.post('/api/exams/questions/', payload)
-
 
 class ExamPermissionTests(ExamsTestBase):
     def test_teacher_can_create_exam(self):
@@ -154,7 +151,6 @@ class ExamPermissionTests(ExamsTestBase):
         response = self.client.get('/api/exams/')
         self.assertEqual(response.status_code, 401)
 
-
 class ExamQuestionTests(ExamsTestBase):
     def setUp(self):
         super().setUp()
@@ -196,7 +192,6 @@ class ExamQuestionTests(ExamsTestBase):
         self.auth('ex_student_a')
         response = self.create_question(self.exam_id, question_number='1')
         self.assertEqual(response.status_code, 403)
-
 
 class MarkingSchemeTests(ExamsTestBase):
     def setUp(self):
@@ -244,7 +239,6 @@ class MarkingSchemeTests(ExamsTestBase):
             f'/api/exams/questions/{self.question_id}/marking-scheme/', {'criterion': 'Sneaky', 'marks': 1},
         )
         self.assertEqual(response.status_code, 404)
-
 
 class PublicationWorkflowTests(ExamsTestBase):
     def setUp(self):
@@ -319,7 +313,6 @@ class PublicationWorkflowTests(ExamsTestBase):
         response = self.client.delete(f'/api/exams/{self.exam_id}/')
         self.assertEqual(response.status_code, 400)
 
-
 class CandidateRosterTests(ExamsTestBase):
     def setUp(self):
         super().setUp()
@@ -389,7 +382,6 @@ class CandidateRosterTests(ExamsTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['data']), 1)
 
-
 class ExamScriptTestBase(ExamsTestBase):
     def setUp(self):
         super().setUp()
@@ -415,7 +407,6 @@ class ExamScriptTestBase(ExamsTestBase):
         return self.client.post(f'/api/exams/{self.exam_id}/scripts/', {
             'candidate_number': candidate_number, 'file': file or self.pdf_file(),
         }, format='multipart')
-
 
 class ScriptUploadTests(ExamScriptTestBase):
     def test_teacher_can_upload_script(self):
@@ -499,7 +490,6 @@ class ScriptUploadTests(ExamScriptTestBase):
 
     def test_examiner_can_upload_script_and_is_auto_assigned(self):
         examiner = create_user(User.Role.EXAMINER, school=self.school_a, username='su_examiner')
-        # Exam must be MARKING status for EXAMINER's queryset to include it.
         self.auth('ex_teacher_a')
         self.client.post(f'/api/exams/{self.exam_id}/start-marking/')
         self.auth('su_examiner')
@@ -518,7 +508,6 @@ class ScriptUploadTests(ExamScriptTestBase):
         self.auth('su_examiner_b')
         response = self.upload_script()
         self.assertEqual(response.status_code, 404)
-
 
 class ScriptFileValidationTests(ExamScriptTestBase):
     def test_disallowed_extension_rejected(self):
@@ -549,12 +538,8 @@ class ScriptFileValidationTests(ExamScriptTestBase):
         }, format='multipart')
         self.assertNotEqual(response.data['data']['checksum'], 'totally-fake-checksum')
 
-
 class ScriptCrossSchoolIsolationTests(ExamScriptTestBase):
     def test_candidate_number_from_a_different_exam_is_not_reused(self):
-        # 'F2A-001' is registered for School A's exam (self.exam_id), not
-        # this new School B exam -- candidate numbers are scoped per exam,
-        # so this must be rejected as "no such candidate", not accepted.
         self.auth('ex_teacher_b')
         exam_b_id = self.create_exam(title='School B Exam', subject=self.subject_b.id).data['data']['id']
         question_b_id = self.create_question(exam_b_id, question_number='1', max_marks=5).data['data']['id']
@@ -565,7 +550,7 @@ class ScriptCrossSchoolIsolationTests(ExamScriptTestBase):
         response = self.client.post(f'/api/exams/{exam_b_id}/scripts/', {
             'candidate_number': 'F2A-001', 'file': self.pdf_file(),
         }, format='multipart')
-        self.assertEqual(response.status_code, 400)  # no such candidate registered for THIS exam
+        self.assertEqual(response.status_code, 400)
 
     def test_school_a_teacher_cannot_see_school_b_scripts(self):
         self.upload_script()
@@ -580,7 +565,6 @@ class ScriptCrossSchoolIsolationTests(ExamScriptTestBase):
             'candidate_number': 'F2A-001', 'file': self.pdf_file(),
         }, format='multipart')
         self.assertEqual(response.status_code, 401)
-
 
 class ExamMarkingTestBase(ExamsTestBase):
     def setUp(self):
@@ -629,7 +613,6 @@ class ExamMarkingTestBase(ExamsTestBase):
     def start_marking(self):
         return self.client.post(f'/api/exams/{self.exam_id}/start-marking/')
 
-
 class ObjectiveMarkingTests(ExamMarkingTestBase):
     def setUp(self):
         super().setUp()
@@ -672,7 +655,6 @@ class ObjectiveMarkingTests(ExamMarkingTestBase):
             'recorded_answer': 'C', 'teacher_final_marks': 5,
         })
         self.assertEqual(float(response.data['data']['teacher_final_marks']), 5.0)
-
 
 class SubjectiveMarkingTests(ExamMarkingTestBase):
     def setUp(self):
@@ -720,12 +702,10 @@ class SubjectiveMarkingTests(ExamMarkingTestBase):
         self.assertEqual(float(response.data['data']['ai_marks_awarded']), 6.0)
         self.assertIsNone(response.data['data']['teacher_final_marks'])
 
-        # Teacher reviews and sets their OWN final mark, independent of the AI suggestion.
         self.client.post(f'/api/exams/answers/{self.subjective_answer_id}/mark/', {'teacher_final_marks': 8})
         answer.refresh_from_db()
-        self.assertEqual(answer.ai_marks_awarded, 6)  # untouched
-        self.assertEqual(answer.teacher_final_marks, 8)  # teacher's own decision
-
+        self.assertEqual(answer.ai_marks_awarded, 6)
+        self.assertEqual(answer.teacher_final_marks, 8)
 
 class MarkingModelValidationTests(ExamMarkingTestBase):
     def test_model_rejects_teacher_final_marks_above_max_marks(self):
@@ -748,7 +728,6 @@ class MarkingModelValidationTests(ExamMarkingTestBase):
         )
         self.assertEqual(response.status_code, 400)
 
-
 class MarkingWorkflowTests(ExamMarkingTestBase):
     def test_cannot_mark_before_marking_status(self):
         response = self.client.post(
@@ -765,7 +744,7 @@ class MarkingWorkflowTests(ExamMarkingTestBase):
         self.start_marking()
         self.client.post(f'/api/exams/answers/{self.objective_answer_id}/mark/', {'recorded_answer': 'B'})
         exam = Exam.objects.get(id=self.exam_id)
-        self.assertEqual(exam.status, Exam.Status.MARKING)  # never auto-transitions/publishes
+        self.assertEqual(exam.status, Exam.Status.MARKING)
 
     def test_other_teacher_cannot_mark(self):
         self.start_marking()
@@ -773,7 +752,7 @@ class MarkingWorkflowTests(ExamMarkingTestBase):
         response = self.client.post(
             f'/api/exams/answers/{self.objective_answer_id}/mark/', {'recorded_answer': 'B'},
         )
-        self.assertEqual(response.status_code, 404)  # answer invisible to a peer teacher's scoped queryset
+        self.assertEqual(response.status_code, 404)
 
     def test_student_cannot_mark(self):
         self.start_marking()
@@ -813,15 +792,12 @@ class MarkingWorkflowTests(ExamMarkingTestBase):
         self.assertEqual(response.status_code, 404)
 
     def test_peer_teacher_cannot_start_marking(self):
-        # Peer teacher's get_queryset() scopes to their own exams, so 404.
         self.auth('ex_teacher_a2')
         response = self.client.post(f'/api/exams/{self.exam_id}/start-marking/')
         self.assertEqual(response.status_code, 404)
 
-
 def mock_ai_response(marks_awarded=8, feedback='Good answer, mostly complete.'):
     return Mock(text=json.dumps({'marks_awarded': marks_awarded, 'feedback': feedback}))
-
 
 class AIMarkingTestBase(ExamMarkingTestBase):
     def setUp(self):
@@ -840,7 +816,6 @@ class AIMarkingTestBase(ExamMarkingTestBase):
     def ai_mark(self):
         return self.client.post(f'/api/exams/scripts/{self.script_id}/ai-mark/')
 
-
 class AISubjectiveMarkingTests(AIMarkingTestBase):
     @patch('apps.exams.ai_marking_service.get_ai_service')
     def test_ai_mark_success_populates_ai_fields(self, mock_get_service):
@@ -853,7 +828,7 @@ class AISubjectiveMarkingTests(AIMarkingTestBase):
         answer = StudentExamAnswer.objects.get(id=self.subjective_answer_id)
         self.assertEqual(answer.ai_marks_awarded, 8)
         self.assertEqual(answer.ai_feedback, 'Good answer, mostly complete.')
-        self.assertIsNone(answer.teacher_final_marks)  # AI never sets this
+        self.assertIsNone(answer.teacher_final_marks)
 
     @patch('apps.exams.ai_marking_service.get_ai_service')
     def test_ai_mark_leaves_objective_answers_untouched(self, mock_get_service):
@@ -862,10 +837,9 @@ class AISubjectiveMarkingTests(AIMarkingTestBase):
         self.ai_mark()
         objective_answer = StudentExamAnswer.objects.get(id=self.objective_answer_id)
         self.assertIsNone(objective_answer.ai_marks_awarded)
-        self.assertIsNone(objective_answer.teacher_final_marks)  # never recorded/marked in this test
+        self.assertIsNone(objective_answer.teacher_final_marks)
 
     def test_ai_mark_skips_untranscribed_answers(self):
-        # Blank/un-OCR'd answers are skipped; script still reaches MARKED.
         response = self.ai_mark()
         self.assertEqual(response.status_code, 200)
         script = ExamScript.objects.get(id=self.script_id)
@@ -882,8 +856,6 @@ class AISubjectiveMarkingTests(AIMarkingTestBase):
         self.client.post(f'/api/exams/{other_exam_id}/candidates/', {
             'student': self.student_a2.id, 'candidate_number': 'F2A-002',
         })
-        # Not closed yet -- can't upload a script, so there's no script to
-        # ai-mark in the first place; confirms the precondition chain holds.
         response = self.client.post(f'/api/exams/{other_exam_id}/scripts/', {
             'candidate_number': 'F2A-002', 'file': self.pdf_file(),
         }, format='multipart')
@@ -897,7 +869,6 @@ class AISubjectiveMarkingTests(AIMarkingTestBase):
         response = self.ai_mark()
         self.assertEqual(response.status_code, 400)
 
-
 class AIFailureAndRetryTests(AIMarkingTestBase):
     @patch('apps.exams.ai_marking_service.get_ai_service')
     def test_ai_unavailable_marks_script_failed(self, mock_get_service):
@@ -909,7 +880,7 @@ class AIFailureAndRetryTests(AIMarkingTestBase):
         self.assertTrue(response.data['data']['marking_error'])
 
         answer = StudentExamAnswer.objects.get(id=self.subjective_answer_id)
-        self.assertIsNone(answer.ai_marks_awarded)  # never partially populated
+        self.assertIsNone(answer.ai_marks_awarded)
 
     @patch('apps.exams.ai_marking_service.get_ai_service')
     def test_invalid_json_response_marks_script_failed(self, mock_get_service):
@@ -920,7 +891,6 @@ class AIFailureAndRetryTests(AIMarkingTestBase):
 
     @patch('apps.exams.ai_marking_service.get_ai_service')
     def test_out_of_range_marks_rejected(self, mock_get_service):
-        # Question max_marks is 10 -- AI claiming 50 must be rejected, not silently clamped.
         mock_get_service.return_value = Mock(generate=Mock(return_value=mock_ai_response(marks_awarded=50)))
         self.record_subjective_answer()
         response = self.ai_mark()
@@ -936,14 +906,12 @@ class AIFailureAndRetryTests(AIMarkingTestBase):
         self.assertEqual(response.data['data']['status'], 'FAILED')
 
     def test_retry_after_failure_can_succeed(self):
-        # First attempt: AI service is unavailable -> FAILED.
         self.record_subjective_answer()
         with patch('apps.exams.ai_marking_service.get_ai_service') as mock_get_service:
             mock_get_service.return_value = Mock(generate=Mock(side_effect=AIServiceUnavailableError('down')))
             r1 = self.ai_mark()
         self.assertEqual(r1.data['data']['status'], 'FAILED')
 
-        # Retry after the service recovers -> MARKED.
         with patch('apps.exams.ai_marking_service.get_ai_service') as mock_get_service:
             mock_get_service.return_value = Mock(generate=Mock(return_value=mock_ai_response()))
             r2 = self.ai_mark()
@@ -960,8 +928,7 @@ class AIFailureAndRetryTests(AIMarkingTestBase):
         self.assertEqual(float(response.data['data']['teacher_final_marks']), 9.0)
 
         script = ExamScript.objects.get(id=self.script_id)
-        self.assertEqual(script.status, 'UPLOADED')  # AI workflow never touched
-
+        self.assertEqual(script.status, 'UPLOADED')
 
 class ScriptWorkflowTests(AIMarkingTestBase):
     def setUp(self):
@@ -996,13 +963,12 @@ class ScriptWorkflowTests(AIMarkingTestBase):
 
     def test_cannot_finalize_before_submit_for_review(self):
         self.run_ai_mark_success()
-        # EXAM_MARKING_MANAGER cannot finalize a script not yet in TEACHER_REVIEW.
         self.auth('wf_marking_mgr')
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/finalize/')
         self.assertEqual(response.status_code, 400)
 
     def test_finalize_blocked_if_any_answer_unmarked(self):
-        self.run_ai_mark_success()  # subjective now has ai_marks_awarded, but NOT teacher_final_marks
+        self.run_ai_mark_success()
         self.client.post(f'/api/exams/scripts/{self.script_id}/submit-for-review/')
         self.auth('wf_marking_mgr')
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/finalize/')
@@ -1013,9 +979,6 @@ class ScriptWorkflowTests(AIMarkingTestBase):
         self.run_ai_mark_success()
         self.client.post(f'/api/exams/scripts/{self.script_id}/submit-for-review/')
 
-        # Teacher reviews: confirms the objective mark (deterministic) and
-        # the subjective one (accepting the AI's suggested 8, their own
-        # explicit action either way).
         self.client.post(f'/api/exams/answers/{self.objective_answer_id}/mark/', {'recorded_answer': 'B'})
         self.client.post(f'/api/exams/answers/{self.subjective_answer_id}/mark/', {'teacher_final_marks': 8})
 
@@ -1024,8 +987,8 @@ class ScriptWorkflowTests(AIMarkingTestBase):
         self.assertEqual(response.data['data']['status'], 'FINALIZED')
 
         attempt = StudentExamAttempt.objects.get(id=self.attempt_id)
-        self.assertEqual(attempt.total_marks, 15)  # 5 (objective) + 10 (subjective max)
-        self.assertEqual(attempt.score, 13)  # 5 (objective correct) + 8 (subjective teacher mark)
+        self.assertEqual(attempt.total_marks, 15)
+        self.assertEqual(attempt.score, 13)
         self.assertAlmostEqual(float(attempt.percentage), 13 / 15 * 100, places=2)
 
     def test_finalize_allowed_with_manual_marks_only_no_ai(self):
@@ -1047,7 +1010,6 @@ class ScriptWorkflowTests(AIMarkingTestBase):
         self.auth('wf_marking_mgr')
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/finalize/')
         self.assertEqual(response.status_code, 400)
-
 
 class ScriptMarkingPermissionTests(AIMarkingTestBase):
     def test_other_teacher_cannot_ai_mark(self):
@@ -1083,7 +1045,6 @@ class ScriptMarkingPermissionTests(AIMarkingTestBase):
         response = self.ai_mark()
         self.assertEqual(response.status_code, 401)
 
-
 class ExamResultsTestBase(ExamMarkingTestBase):
     def setUp(self):
         super().setUp()
@@ -1094,8 +1055,6 @@ class ExamResultsTestBase(ExamMarkingTestBase):
             exam_id=self.exam_id, candidate__candidate_number='F2A-001',
         ).id
         self.start_marking()
-        # Mark everything manually -- Phase 18 doesn't need AI involved,
-        # it's about the finalize->publish gate and student visibility.
         self.client.post(f'/api/exams/answers/{self.objective_answer_id}/mark/', {'recorded_answer': 'B'})
         self.client.post(
             f'/api/exams/answers/{self.subjective_answer_id}/mark/',
@@ -1103,17 +1062,11 @@ class ExamResultsTestBase(ExamMarkingTestBase):
         )
 
     def finalize_script(self):
-        # Real API path: every answer already has teacher_final_marks (set
-        # manually in setUp, no AI involved), so submit-for-review can
-        # skip straight from UPLOADED -- this is the "AI is optional"
-        # guarantee, exercised for real rather than faked via the ORM.
-        # Submit for review as teacher, then finalize as EXAM_MARKING_MANAGER.
         self.client.post(f'/api/exams/scripts/{self.script_id}/submit-for-review/')
         self.auth('er_marking_mgr')
         resp = self.client.post(f'/api/exams/scripts/{self.script_id}/finalize/')
-        self.auth('ex_teacher_a')  # restore for caller
+        self.auth('ex_teacher_a')
         return resp
-
 
 class ManualOnlyMarkingWorkflowTests(ExamResultsTestBase):
     """Confirms AI is never a hard requirement to progress a script: when
@@ -1123,7 +1076,7 @@ class ManualOnlyMarkingWorkflowTests(ExamResultsTestBase):
 
     def test_submit_for_review_from_uploaded_when_fully_manually_marked(self):
         script = ExamScript.objects.get(id=self.script_id)
-        self.assertEqual(script.status, ExamScript.Status.UPLOADED)  # ai-mark never called
+        self.assertEqual(script.status, ExamScript.Status.UPLOADED)
 
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/submit-for-review/')
         self.assertEqual(response.status_code, 200)
@@ -1141,14 +1094,12 @@ class ManualOnlyMarkingWorkflowTests(ExamResultsTestBase):
         self.assertEqual(result.data['data']['count'], 1)
 
     def test_cannot_submit_for_review_from_uploaded_if_any_answer_still_unmarked(self):
-        # Un-mark the objective answer to simulate incomplete manual marking.
         answer = StudentExamAnswer.objects.get(id=self.objective_answer_id)
         answer.teacher_final_marks = None
         answer.save(update_fields=['teacher_final_marks'])
 
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/submit-for-review/')
         self.assertEqual(response.status_code, 400)
-
 
 class PublishGateTests(ExamResultsTestBase):
     def test_cannot_publish_unreviewed_result(self):
@@ -1197,10 +1148,9 @@ class PublishGateTests(ExamResultsTestBase):
         response = self.client.post(f'/api/exams/scripts/{self.script_id}/publish/')
         self.assertEqual(response.status_code, 404)
 
-
 class StudentResultVisibilityTests(ExamResultsTestBase):
     def test_student_cannot_see_result_before_published(self):
-        self.finalize_script()  # FINALIZED, but not yet PUBLISHED
+        self.finalize_script()
         self.auth('ex_student_a')
         response = self.client.get('/api/exams/results/')
         self.assertEqual(response.data['data']['count'], 0)
@@ -1216,7 +1166,7 @@ class StudentResultVisibilityTests(ExamResultsTestBase):
 
         result = response.data['data']['results'][0]
         self.assertEqual(result['candidate_number'], 'F2A-001')
-        self.assertEqual(float(result['score']), 13.0)  # 5 (objective) + 8 (subjective)
+        self.assertEqual(float(result['score']), 13.0)
         self.assertEqual(result['total_marks'], 15)
         self.assertAlmostEqual(float(result['percentage']), 13 / 15 * 100, places=2)
 
@@ -1264,7 +1214,6 @@ class StudentResultVisibilityTests(ExamResultsTestBase):
         response = self.client.get('/api/exams/results/')
         self.assertEqual(response.status_code, 401)
 
-
 class BulkPublishResultsTests(ExamResultsTestBase):
     def test_publish_results_publishes_finalized_scripts(self):
         self.finalize_script()
@@ -1304,15 +1253,11 @@ class BulkPublishResultsTests(ExamResultsTestBase):
         response = self.client.post(f'/api/exams/{self.exam_id}/publish-results/')
         self.assertEqual(response.status_code, 404)
 
-
-# ── Phase 2 RBAC tests ────────────────────────────────────────────────────────
-
 class Phase2RBACScriptBase(ExamMarkingTestBase):
     """Extends ExamMarkingTestBase with marking-domain users for Phase 2 tests."""
 
     def setUp(self):
         super().setUp()
-        # Marking domain users for school_a.
         self.marking_mgr = create_user(
             User.Role.EXAM_MARKING_MANAGER, school=self.school_a, username='p2_marking_mgr',
         )
@@ -1328,7 +1273,6 @@ class Phase2RBACScriptBase(ExamMarkingTestBase):
         self.checker = create_user(
             User.Role.CHECKER, school=self.school_a, username='p2_checker',
         )
-        # script_id already exists (uploaded in ExamMarkingTestBase.setUp).
         self.script = ExamScript.objects.get(id=ExamScript.objects.filter(
             exam_id=self.exam_id
         ).values_list('id', flat=True).first())
@@ -1355,13 +1299,11 @@ class Phase2RBACScriptBase(ExamMarkingTestBase):
     def finalize_script(self):
         return self.client.post(f'/api/exams/scripts/{self.script.id}/finalize/')
 
-
 class SystemAdminMarkingExclusionTests(Phase2RBACScriptBase):
     """System admin must be excluded from all routine marking operations."""
 
     def setUp(self):
         super().setUp()
-        # Start marking so the script is in MARKED state for later steps.
         self.auth('ex_teacher_a')
         self.start_marking()
 
@@ -1371,7 +1313,6 @@ class SystemAdminMarkingExclusionTests(Phase2RBACScriptBase):
         self.assertEqual(response.status_code, 403)
 
     def test_system_admin_cannot_submit_for_review(self):
-        # First mark everything as teacher so the script is ready.
         self.auth('ex_teacher_a')
         self.mark_answer(self.objective_answer_id, recorded_answer='B')
         self.mark_answer(self.subjective_answer_id, teacher_final_marks=8)
@@ -1381,7 +1322,6 @@ class SystemAdminMarkingExclusionTests(Phase2RBACScriptBase):
         self.assertEqual(response.status_code, 403)
 
     def test_system_admin_cannot_finalize_script(self):
-        # Manually advance through workflow as teacher.
         self.auth('ex_teacher_a')
         self.mark_answer(self.objective_answer_id, recorded_answer='B')
         self.mark_answer(self.subjective_answer_id, teacher_final_marks=8)
@@ -1391,13 +1331,11 @@ class SystemAdminMarkingExclusionTests(Phase2RBACScriptBase):
         response = self.finalize_script()
         self.assertEqual(response.status_code, 403)
 
-
 class MarkingManagerScriptAccessTests(Phase2RBACScriptBase):
     """EXAM_MARKING_MANAGER can manage scripts for their own school."""
 
     def setUp(self):
         super().setUp()
-        # Advance script to MARKED + TEACHER_REVIEW so marking_mgr can finalize.
         self.auth('ex_teacher_a')
         self.start_marking()
         self.mark_answer(self.objective_answer_id, recorded_answer='B')
@@ -1417,14 +1355,12 @@ class MarkingManagerScriptAccessTests(Phase2RBACScriptBase):
         self.assertEqual(response.data['data']['status'], 'FINALIZED')
 
     def test_marking_manager_other_school_cannot_see_scripts(self):
-        # School B manager: school_a exam is not in their queryset → 404, not data leak.
         create_user(
             User.Role.EXAM_MARKING_MANAGER, school=self.school_b, username='p2_marking_mgr_b',
         )
         self.auth('p2_marking_mgr_b')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 404)
-
 
 class ExaminerAssignmentScopingTests(Phase2RBACScriptBase):
     """EXAMINER visibility and marking must be scoped to their assignments."""
@@ -1435,7 +1371,6 @@ class ExaminerAssignmentScopingTests(Phase2RBACScriptBase):
         self.start_marking()
 
     def test_examiner_at_school_can_see_marking_exam(self):
-        # Any EXAMINER at the school can see MARKING exams without a panel entry.
         self.auth('p2_examiner')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 200)
@@ -1448,7 +1383,6 @@ class ExaminerAssignmentScopingTests(Phase2RBACScriptBase):
         self.assertEqual(len(response.data['data']), 1)
 
     def test_examiner_at_school_can_mark_without_prior_assignment(self):
-        # Any EXAMINER at the school can mark scripts for MARKING exams.
         self.auth('p2_examiner')
         response = self.mark_answer(self.objective_answer_id, recorded_answer='B')
         self.assertEqual(response.status_code, 200)
@@ -1460,14 +1394,10 @@ class ExaminerAssignmentScopingTests(Phase2RBACScriptBase):
         self.assertEqual(response.status_code, 200)
 
     def test_examiner_different_school_cannot_see_scripts(self):
-        # school_b examiner: the exam itself is not in their queryset → 404, not data leak.
         self.assign_examiner(examiner=self.examiner_b)
         self.auth('p2_examiner_b')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 404)
-
-
-# ── Phase 7 integration & hardening tests ────────────────────────────────────
 
 class Phase7Base(Phase2RBACScriptBase):
     """Common setUp: marking started, all answers marked, ready for review."""
@@ -1498,62 +1428,52 @@ class Phase7Base(Phase2RBACScriptBase):
         self.auth('p2_marking_mgr')
         self.finalize_script()
 
-
 class CheckerDataEntryAccessTests(Phase7Base):
     """MVP: CHECKER, DATA_ENTRY_CLERK, and IT_SUPPORT are removed from
     active marking roles. Verify they can no longer access marking resources."""
 
     def test_checker_cannot_see_scripts(self):
-        # CHECKER is no longer in MARKING_READ_ROLES → exam not in queryset → 404.
         self.auth('p2_checker')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 404)
 
     def test_checker_cannot_finalize_script(self):
-        # CHECKER can't even see the exam → 404.
         self._advance_to_teacher_review()
         self.auth('p2_checker')
         response = self.finalize_script()
         self.assertEqual(response.status_code, 404)
 
     def test_data_entry_clerk_cannot_see_scripts(self):
-        # DATA_ENTRY_CLERK is no longer in MARKING_READ_ROLES → 404.
         self.auth('p7_data_entry')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 404)
 
     def test_data_entry_clerk_cannot_mark_answers(self):
-        # DATA_ENTRY_CLERK not in MARKING_READ_ROLES → answer not in queryset → 404.
         self.auth('p7_data_entry')
         response = self.mark_answer(self.subjective_answer_id, teacher_final_marks=7)
         self.assertEqual(response.status_code, 404)
 
     def test_it_support_cannot_see_scripts(self):
-        # IT_SUPPORT removed from MARKING_READ_ROLES → 404.
         self.auth('p7_it_support')
         response = self.client.get(f'/api/exams/{self.exam_id}/scripts/')
         self.assertEqual(response.status_code, 404)
 
     def test_it_support_cannot_mark_answers(self):
-        # IT_SUPPORT not in MARKING_READ_ROLES → answer not in queryset → 404.
         self.auth('p7_it_support')
         response = self.mark_answer(self.subjective_answer_id, teacher_final_marks=7)
         self.assertEqual(response.status_code, 404)
 
     def test_it_support_cannot_finalize_script(self):
-        # IT_SUPPORT not in MARKING_READ_ROLES → script not in queryset → 404.
         self._advance_to_teacher_review()
         self.auth('p7_it_support')
         response = self.finalize_script()
         self.assertEqual(response.status_code, 404)
 
     def test_it_support_cannot_submit_for_review(self):
-        # IT_SUPPORT not in MARKING_READ_ROLES → script not in queryset → 404.
         self._mark_all_answers()
         self.auth('p7_it_support')
         response = self.submit_for_review()
         self.assertEqual(response.status_code, 404)
-
 
 class AuditLogCreationTests(Phase7Base):
     """Verify that state-changing actions create MarkingAuditLog entries."""
@@ -1584,7 +1504,6 @@ class AuditLogCreationTests(Phase7Base):
             MarkingAuditLog.objects.filter(action=MarkingAuditLog.Action.SCRIPT_FINALIZED).count(),
             initial_count + 1,
         )
-        # Finalize detail includes score.
         self.assertIn('score', entry.detail)
 
     def test_answer_mark_creates_audit_entry(self):
@@ -1601,7 +1520,7 @@ class AuditLogCreationTests(Phase7Base):
     def test_audit_entry_snapshots_actor_username(self):
         self.auth('p2_marking_mgr')
         self._advance_to_teacher_review()
-        self.auth('p2_marking_mgr')  # _advance_to_teacher_review switches auth to ex_teacher_a
+        self.auth('p2_marking_mgr')
         self.finalize_script()
         entry = MarkingAuditLog.objects.filter(
             action=MarkingAuditLog.Action.SCRIPT_FINALIZED,
@@ -1621,13 +1540,11 @@ class AuditLogCreationTests(Phase7Base):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.exam_id, self.exam_id)
 
-
 class AuditLogAPITests(Phase7Base):
     """EXAM_MARKING_MANAGER can query the audit log; other roles cannot."""
 
     def setUp(self):
         super().setUp()
-        # Seed one audit entry.
         self._advance_to_teacher_review()
 
     def test_marking_manager_can_list_audit_log(self):
@@ -1646,7 +1563,6 @@ class AuditLogAPITests(Phase7Base):
         self.auth('p2_chief_examiner')
         response = self.client.get('/api/exams/audit/')
         self.assertEqual(response.status_code, 200)
-        # Chief examiner is not EXAM_MARKING_MANAGER → empty queryset, not 403.
         self.assertEqual(len(response.data['data']), 0)
 
     def test_examiner_cannot_access_audit_log(self):
@@ -1662,7 +1578,6 @@ class AuditLogAPITests(Phase7Base):
         self.auth('p7_mgr_b')
         response = self.client.get(f'/api/exams/audit/?exam={self.exam_id}')
         self.assertEqual(response.status_code, 200)
-        # school_b manager sees no entries for school_a exam.
         self.assertEqual(len(response.data['data']), 0)
 
     def test_audit_log_action_filter(self):
@@ -1676,7 +1591,6 @@ class AuditLogAPITests(Phase7Base):
         self.client.credentials()
         response = self.client.get('/api/exams/audit/')
         self.assertEqual(response.status_code, 401)
-
 
 class ScriptAssignmentAPITests(Phase7Base):
     """POST/DELETE /api/exams/scripts/:id/assign/ — assignment management."""
@@ -1692,7 +1606,6 @@ class ScriptAssignmentAPITests(Phase7Base):
         self.assertEqual(response.data['data']['role'], 'EXAMINER')
 
     def test_chief_examiner_cannot_assign(self):
-        # CHIEF_EXAMINER is no longer in MARKING_READ_ROLES → script not in queryset → 404.
         self.auth('p2_chief_examiner')
         response = self.client.post(
             f'/api/exams/scripts/{self.script.id}/assign/',
@@ -1706,7 +1619,6 @@ class ScriptAssignmentAPITests(Phase7Base):
             f'/api/exams/scripts/{self.script.id}/assign/',
             {'assignee_id': self.checker.id, 'role': 'EXAMINER'},
         )
-        # EXAMINER can see the script but is not allowed to assign (only EXAM_MARKING_MANAGER can).
         self.assertEqual(response.status_code, 403)
 
     def test_assigning_non_school_user_fails(self):
@@ -1718,7 +1630,6 @@ class ScriptAssignmentAPITests(Phase7Base):
         self.assertEqual(response.status_code, 400)
 
     def test_assigning_teacher_without_secondary_role_fails(self):
-        # teacher_a has no secondary_role → assignment must be rejected.
         self.auth('p2_marking_mgr')
         response = self.client.post(
             f'/api/exams/scripts/{self.script.id}/assign/',
@@ -1727,7 +1638,6 @@ class ScriptAssignmentAPITests(Phase7Base):
         self.assertEqual(response.status_code, 400)
 
     def test_assigning_teacher_with_examiner_secondary_role_succeeds(self):
-        # Give teacher_a a secondary role of EXAMINER, then assign them.
         self.teacher_a.secondary_role = 'EXAMINER'
         self.teacher_a.save(update_fields=['secondary_role'])
         self.auth('p2_marking_mgr')
@@ -1787,7 +1697,6 @@ class ScriptAssignmentAPITests(Phase7Base):
             ).exists(),
         )
 
-
 class EmergencyResetTests(Phase7Base):
     """POST /api/exams/scripts/:id/reset/ — emergency script reset."""
 
@@ -1818,7 +1727,6 @@ class EmergencyResetTests(Phase7Base):
         self.assertEqual(response.data['data']['status'], 'UPLOADED')
 
     def test_chief_examiner_cannot_reset(self):
-        # CHIEF_EXAMINER is no longer in MARKING_READ_ROLES → script not in queryset → 404.
         self._force_script_status(ExamScript.Status.FAILED)
         self.auth('p2_chief_examiner')
         response = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
@@ -1828,11 +1736,9 @@ class EmergencyResetTests(Phase7Base):
         self._force_script_status(ExamScript.Status.FAILED)
         self.auth('p2_examiner')
         response = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
-        # EXAMINER can see the script but reset is manager-only → 403.
         self.assertEqual(response.status_code, 403)
 
     def test_cannot_reset_uploaded_script(self):
-        # Script is in UPLOADED status — reset only allows FAILED/PROCESSING.
         self.auth('p2_marking_mgr')
         response = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
         self.assertEqual(response.status_code, 400)
@@ -1870,9 +1776,7 @@ class EmergencyResetTests(Phase7Base):
         )
         self.auth('p7_mgr_b_reset')
         response = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
-        # school_b manager's queryset filters to school_b → school_a script not found → 404.
         self.assertEqual(response.status_code, 404)
-
 
 class FullMarkingWorkflowIntegrationTests(Phase7Base):
     """End-to-end integration: covers the complete marking lifecycle with
@@ -1880,7 +1784,6 @@ class FullMarkingWorkflowIntegrationTests(Phase7Base):
 
     def test_complete_examiner_led_workflow(self):
         """EXAM_MARKING_MANAGER assigns → EXAMINER marks and submits → MANAGER finalizes."""
-        # Step 1: Manager assigns examiner.
         self.auth('p2_marking_mgr')
         assign_resp = self.client.post(
             f'/api/exams/scripts/{self.script.id}/assign/',
@@ -1888,19 +1791,16 @@ class FullMarkingWorkflowIntegrationTests(Phase7Base):
         )
         self.assertIn(assign_resp.status_code, (200, 201))
 
-        # Step 2: Examiner marks both answers.
         self.auth('p2_examiner')
         mark1 = self.mark_answer(self.objective_answer_id, recorded_answer='B')
         mark2 = self.mark_answer(self.subjective_answer_id, teacher_final_marks=7)
         self.assertEqual(mark1.status_code, 200)
         self.assertEqual(mark2.status_code, 200)
 
-        # Step 3: Examiner submits for review.
         submit_resp = self.submit_for_review()
         self.assertEqual(submit_resp.status_code, 200)
         self.assertEqual(submit_resp.data['data']['status'], 'TEACHER_REVIEW')
 
-        # Step 4: Manager finalizes (EXAMINERs submit; only MANAGER finalizes).
         self.auth('p2_marking_mgr')
         finalize_resp = self.finalize_script()
         self.assertEqual(finalize_resp.status_code, 200)
@@ -1935,25 +1835,21 @@ class FullMarkingWorkflowIntegrationTests(Phase7Base):
 
     def test_failed_then_reset_then_full_workflow(self):
         """FAILED script can be reset, re-marked, and completed normally."""
-        # Force to FAILED.
         self.script.status = ExamScript.Status.FAILED
         self.script.marking_error = 'AI timeout'
         self.script.save(update_fields=['status', 'marking_error', 'updated_at'])
 
-        # Emergency reset.
         self.auth('p2_marking_mgr')
         reset_resp = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
         self.assertEqual(reset_resp.status_code, 200)
         self.assertEqual(reset_resp.data['data']['status'], 'UPLOADED')
 
-        # Manual marking after reset.
         self.auth('ex_teacher_a')
         self.mark_answer(self.objective_answer_id, recorded_answer='B')
         self.mark_answer(self.subjective_answer_id, teacher_final_marks=6)
         submit_resp = self.submit_for_review()
         self.assertEqual(submit_resp.status_code, 200)
 
-        # Finalize.
         self.auth('p2_marking_mgr')
         finalize_resp = self.finalize_script()
         self.assertEqual(finalize_resp.status_code, 200)
@@ -1988,5 +1884,4 @@ class FullMarkingWorkflowIntegrationTests(Phase7Base):
         self.auth('ex_sysadmin')
         response = self.client.post(f'/api/exams/scripts/{self.script.id}/reset/')
         self.assertEqual(response.status_code, 403)
-
 

@@ -6,10 +6,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.crypto import get_random_string
 
-
 def generate_class_code():
     return get_random_string(8, allowed_chars=string.ascii_uppercase + string.digits)
-
 
 class SchoolClass(models.Model):
     """A concrete class/stream at a school for a given academic year, e.g.
@@ -48,7 +46,6 @@ class SchoolClass(models.Model):
     def __str__(self):
         return f'{self.name} ({self.academic_year}) - {self.school.code}'
 
-
 class TeacherClassMembership(models.Model):
     school_class = models.ForeignKey(SchoolClass, on_delete=models.CASCADE, related_name='teacher_memberships')
     teacher = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='teaching_classes')
@@ -69,7 +66,6 @@ class TeacherClassMembership(models.Model):
 
     def __str__(self):
         return f'{self.teacher.username} -> {self.school_class.name}'
-
 
 class StudentClassMembership(models.Model):
     school_class = models.ForeignKey(SchoolClass, on_delete=models.CASCADE, related_name='student_memberships')

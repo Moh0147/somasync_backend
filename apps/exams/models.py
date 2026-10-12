@@ -3,7 +3,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
-
 class Exam(models.Model):
     """A physical school exam SomaSync helps manage — never a replacement
     for the paper sitting itself. Authoring-only in this phase; there is
@@ -28,9 +27,6 @@ class Exam(models.Model):
     total_marks = models.PositiveIntegerField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
-    # Maps section name → minimum answers required, e.g. {"Section C": 2}.
-    # Questions in a listed section are treated as choice questions — unanswered
-    # ones are auto-zeroed at finalize without blocking the teacher.
     section_settings = models.JSONField(default=dict, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_exams')
     published_at = models.DateTimeField(null=True, blank=True)
@@ -53,7 +49,6 @@ class Exam(models.Model):
     def __str__(self):
         return f'{self.title} ({self.academic_year}) - {self.school.code}'
 
-
 class MarkingSchemeDocument(models.Model):
     """Original uploaded marking scheme retained for teacher audit."""
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='marking_scheme_documents')
@@ -65,17 +60,11 @@ class MarkingSchemeDocument(models.Model):
     uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
-
-
 class ExamQuestion(models.Model):
     class Type(models.TextChoices):
         OBJECTIVE = 'OBJECTIVE', 'Objective'
         SUBJECTIVE = 'SUBJECTIVE', 'Subjective'
 
-    # Denormalized from exam.school / exam.created_by, same pattern as
-    # quizzes.Question — an exam question's "editor" is whoever owns the
-    # parent exam, not necessarily whoever physically submitted this
-    # specific request.
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='exam_questions')
     exam = models.ForeignKey(Exam, on_delete=models.CASCADE, related_name='questions')
     created_by = models.ForeignKey(
@@ -90,13 +79,7 @@ class ExamQuestion(models.Model):
         'academics.LearningObjective', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='exam_questions',
     )
-    # Used only for OBJECTIVE questions -- the expected answer, compared
-    # against a manually recorded student response (Phase 16's
-    # ExamMarkingService) for deterministic marking. Never populated by
-    # OCR/handwriting recognition, and irrelevant for SUBJECTIVE questions.
     correct_answer = models.CharField(max_length=255, blank=True)
-    # False for "choice" questions (e.g. Section C: answer 2 of 3).
-    # Unanswered non-compulsory questions are auto-zeroed at finalize.
     is_compulsory = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -120,7 +103,6 @@ class ExamQuestion(models.Model):
 
     def __str__(self):
         return f'{self.exam.title} Q{self.question_number}'
-
 
 class MarkingSchemeItem(models.Model):
     """One criterion within a question's marking scheme. The sum of an
@@ -148,7 +130,6 @@ class MarkingSchemeItem(models.Model):
     def __str__(self):
         return f'{self.criterion} ({self.marks} marks)'
 
-
 class ExamCandidate(models.Model):
     """Links a student to an exam via a candidate number, unique per exam —
     the identity mechanism scripts are matched against later."""
@@ -173,21 +154,17 @@ class ExamCandidate(models.Model):
     def __str__(self):
         return f'{self.candidate_number} - {self.student.username}'
 
-
 ALLOWED_SCRIPT_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg'}
-MAX_SCRIPT_SIZE_BYTES = 25 * 1024 * 1024  # 25MB — scanned multi-page scripts run larger than lesson attachments
-
+MAX_SCRIPT_SIZE_BYTES = 25 * 1024 * 1024
 
 def exam_script_upload_path(instance, filename):
     return f'exam_scripts/{instance.school_id}/{instance.exam_id}/{instance.candidate_id}/{filename}'
-
 
 def exam_script_page_upload_path(instance, filename):
     return (
         f'exam_script_pages/{instance.script.school_id}/'
         f'{instance.script.exam_id}/{instance.script.candidate_id}/{filename}'
     )
-
 
 class ExamScript(models.Model):
     """A scanned exam script upload. Stores metadata only — the file
@@ -229,9 +206,6 @@ class ExamScript(models.Model):
     checksum = models.CharField(max_length=64, blank=True)
     version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=15, choices=Status.choices, default=Status.UPLOADED)
-    # Populated when AI marking (Phase 17) fails for one or more
-    # subjective answers -- lists which question(s) and why, so the
-    # teacher knows what to fix or mark manually instead.
     marking_error = models.TextField(blank=True)
     ocr_status = models.CharField(max_length=15, choices=OCRStatus.choices, default=OCRStatus.NOT_STARTED)
     extracted_text = models.TextField(blank=True)
@@ -259,7 +233,6 @@ class ExamScript(models.Model):
     def __str__(self):
         return f'{self.candidate.candidate_number} v{self.version} ({self.status})'
 
-
 class ExamScriptPage(models.Model):
     """One rendered page from an ExamScript file.
 
@@ -280,7 +253,6 @@ class ExamScriptPage(models.Model):
 
     def __str__(self):
         return f'{self.script} — page {self.page_number}'
-
 
 class ExamScriptAssignment(models.Model):
     """Assigns an EXAMINER or CHECKER to a specific script.
@@ -323,8 +295,6 @@ class ExamScriptAssignment(models.Model):
     def __str__(self):
         return f'{self.assignee.username} ({self.role}) → {self.script}'
 
-
-
 class StudentExamAttempt(models.Model):
     """One per (exam, candidate) — enforced via `candidate` being a
     OneToOneField, since ExamCandidate already uniquely pairs (exam,
@@ -359,7 +329,6 @@ class StudentExamAttempt(models.Model):
 
     def __str__(self):
         return f'{self.candidate.candidate_number} - {self.exam.title}'
-
 
 class StudentExamAnswer(models.Model):
     """One row per (attempt, exam_question), auto-created as an empty
@@ -412,7 +381,6 @@ class StudentExamAnswer(models.Model):
     def __str__(self):
         return f'{self.attempt} - Q{self.exam_question.question_number}'
 
-
 class MarkingAuditLog(models.Model):
     """Append-only record of every state-changing action in the marking
     domain. FKs use SET_NULL so the trail survives deletion of its
@@ -456,5 +424,4 @@ class MarkingAuditLog(models.Model):
 
     def __str__(self):
         return f'{self.actor_username} — {self.action} at {self.created_at:%Y-%m-%d %H:%M}'
-
 

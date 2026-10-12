@@ -7,14 +7,12 @@ from apps.schools.models import School
 
 from .models import SchoolClass, StudentClassMembership, TeacherClassMembership
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class ClassesTestBase(TestCase):
     def setUp(self):
@@ -40,7 +38,6 @@ class ClassesTestBase(TestCase):
         login = self.client.post('/api/auth/login/', {'username': username, 'password': password})
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
-
 
 class SchoolClassCRUDTests(ClassesTestBase):
     def test_admin_can_create_class(self):
@@ -124,7 +121,6 @@ class SchoolClassCRUDTests(ClassesTestBase):
         response = self.client.patch(f'/api/classes/{class_b.id}/', {'name': 'Hacked'})
         self.assertEqual(response.status_code, 404)
 
-
 class TeacherMembershipTests(ClassesTestBase):
     def setUp(self):
         super().setUp()
@@ -184,7 +180,6 @@ class TeacherMembershipTests(ClassesTestBase):
         response = self.client.post(f'/api/classes/{class_b.id}/teachers/', {'user_id': self.teacher_b.id})
         self.assertEqual(response.status_code, 404)
 
-
 class StudentMembershipTests(ClassesTestBase):
     def setUp(self):
         super().setUp()
@@ -212,7 +207,6 @@ class StudentMembershipTests(ClassesTestBase):
         self.auth('cl_admin_a')
         response = self.client.delete(f'/api/classes/{self.class_a.id}/students/', {'user_id': self.student_a.id})
         self.assertEqual(response.status_code, 200)
-
 
 class ClassCodeJoinTests(ClassesTestBase):
     def setUp(self):

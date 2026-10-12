@@ -6,11 +6,9 @@ from apps.lessons.models import Lesson
 
 from .models import LessonProgress
 
-
 def lesson_assigned_to_student(lesson, student):
     class_ids = StudentClassMembership.objects.filter(student=student).values_list('school_class_id', flat=True)
     return lesson.assignments.filter(school_class_id__in=class_ids).exists()
-
 
 def track_lesson_progress(user, data):
     """Core logic behind saving one student's lesson progress. Used by
@@ -29,8 +27,6 @@ def track_lesson_progress(user, data):
     except Lesson.DoesNotExist:
         raise ValidationError({'lesson': 'No such lesson.'})
 
-    # Same generic message for "doesn't exist" and "wrong school" --
-    # never confirm a cross-school lesson's existence.
     if lesson.school_id != user.school_id:
         raise ValidationError({'lesson': 'No such lesson.'})
     if lesson.status != Lesson.Status.PUBLISHED:

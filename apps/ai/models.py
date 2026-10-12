@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.db import models
 
-
 class AIExplanationRequest(models.Model):
     """One student's request for an AI-generated explanation of a specific
     wrong quiz answer. `attempts`/`status` support a queue-like lifecycle
@@ -37,7 +36,6 @@ class AIExplanationRequest(models.Model):
 
     def __str__(self):
         return f'{self.student.username} - answer {self.student_answer_id} ({self.status})'
-
 
 class MistakeExplanationCache(models.Model):
     """A reusable explanation for "Question X, this specific wrong

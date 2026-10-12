@@ -6,9 +6,7 @@ from apps.schools.models import School
 
 User = get_user_model()
 
-# Roles the system admin may NOT assign via the user-management API.
 _FORBIDDEN_ROLES = {User.Role.ADMIN}
-
 
 class UserSerializer(serializers.ModelSerializer):
     school_name = serializers.SerializerMethodField()
@@ -24,7 +22,6 @@ class UserSerializer(serializers.ModelSerializer):
             'school', 'school_name', 'is_active', 'date_joined',
         ]
         read_only_fields = fields
-
 
 class CreateUserSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
@@ -48,7 +45,6 @@ class CreateUserSerializer(serializers.Serializer):
             raise serializers.ValidationError({'school': 'School must be empty for this role.'})
         return data
 
-
 class UpdateUserSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=[
         c for c in User.Role.choices if c[0] not in _FORBIDDEN_ROLES
@@ -63,13 +59,11 @@ class UpdateUserSerializer(serializers.Serializer):
     def validate(self, data):
         instance = self.context.get('instance')
         role = data.get('role', instance.role if instance else None)
-        # If school is being set/cleared, check against the resulting role.
         if 'school' in data:
             school = data['school']
             if role in User._SCHOOL_REQUIRED_ROLES and not school:
                 raise serializers.ValidationError({'school': f'School is required for role {role}.'})
         return data
-
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
@@ -77,7 +71,6 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         user = self.user
         data['user'] = UserSerializer(user).data
         return data
-
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()

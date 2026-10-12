@@ -2,7 +2,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
-
 class Quiz(models.Model):
     """A normal quiz: MCQ / True-False / Matching only, marked
     deterministically (see QuizMarkingService, Phase 9) — AI is never used
@@ -50,17 +49,12 @@ class Quiz(models.Model):
     def __str__(self):
         return f'{self.title} ({self.school.code})'
 
-
 class Question(models.Model):
     class Type(models.TextChoices):
         MCQ = 'MCQ', 'Multiple Choice'
         TRUE_FALSE = 'TRUE_FALSE', 'True/False'
         MATCHING = 'MATCHING', 'Matching'
 
-    # Denormalized from quiz.school / quiz.created_by, consistent with the
-    # pattern used for Topic/LearningObjective/Lesson — `created_by` here
-    # means "whoever owns the parent quiz" (the actual editing authority),
-    # not necessarily whoever physically submitted this specific request.
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='questions')
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name='questions')
     created_by = models.ForeignKey(
@@ -70,11 +64,6 @@ class Question(models.Model):
     text = models.TextField()
     marks = models.PositiveIntegerField(default=1)
     order = models.PositiveIntegerField(default=0)
-    # Optional, teacher-authored. Shown back to the student for a question
-    # they got wrong -- fast, static, offline-cacheable feedback. Separate
-    # from (and doesn't replace) the AI-driven "Explain My Mistake" feature
-    # (Phase 13), which the student can still request for a personalized
-    # explanation if this is blank or they want more detail.
     explanation = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -89,7 +78,6 @@ class Question(models.Model):
 
     def __str__(self):
         return f'[{self.question_type}] {self.text[:50]}'
-
 
 class QuestionOption(models.Model):
     """Used by both MCQ (>=2 options) and TRUE_FALSE (exactly 2) — exactly
@@ -108,7 +96,6 @@ class QuestionOption(models.Model):
     def __str__(self):
         return f'{self.text} ({"correct" if self.is_correct else "incorrect"})'
 
-
 class MatchingPair(models.Model):
     """One correct left/right match for a MATCHING question. The stored
     pairing IS the answer key — a question needs at least 2 pairs to be a
@@ -124,7 +111,6 @@ class MatchingPair(models.Model):
 
     def __str__(self):
         return f'{self.left_text} -> {self.right_text}'
-
 
 class QuizAssignment(models.Model):
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name='assignments')
@@ -148,7 +134,6 @@ class QuizAssignment(models.Model):
 
     def __str__(self):
         return f'{self.quiz.title} -> {self.school_class.name}'
-
 
 class StudentQuizAttempt(models.Model):
     """A student's attempt at a quiz, designed to be created and filled in
@@ -199,9 +184,6 @@ class StudentQuizAttempt(models.Model):
     class Meta:
         ordering = ['-started_at']
         indexes = [
-            # Backs the sync-pull hot path: "this student's attempts
-            # updated since <timestamp>" -- the exact query a student
-            # catching up after being offline for days runs.
             models.Index(fields=['student', 'updated_at'], name='quizattempt_stu_upd_idx'),
         ]
 
@@ -214,7 +196,6 @@ class StudentQuizAttempt(models.Model):
 
     def __str__(self):
         return f'{self.student.username} -> {self.quiz.title} ({self.status})'
-
 
 class StudentQuizAnswer(models.Model):
     """One row per (attempt, question) — re-answering the same question
@@ -229,8 +210,6 @@ class StudentQuizAnswer(models.Model):
         QuestionOption, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
     matching_response = models.JSONField(default=dict, blank=True)
-    # Populated by QuizMarkingService (Phase 9) once the attempt is marked
-    # — null until then, never computed by AI.
     is_correct = models.BooleanField(null=True, blank=True)
     marks_awarded = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     answered_at = models.DateTimeField(auto_now=True)

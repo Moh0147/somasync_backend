@@ -12,22 +12,20 @@ Dependencies already in requirements.txt: PyMuPDF (fitz).
 import io
 from decimal import Decimal
 
-import fitz  # PyMuPDF
+import fitz
 
-# A4 landscape in points
 PAGE_W = 842
 PAGE_H = 595
 
 MARGIN = 30
-COL_CAND = 90   # candidate number column width
-COL_NAME = 110  # student name column width
-COL_Q = 36      # per-question column width
-COL_TOT = 50    # total column width
-COL_PCT = 44    # % column width
+COL_CAND = 90
+COL_NAME = 110
+COL_Q = 36
+COL_TOT = 50
+COL_PCT = 44
 
 ROW_H = 18
-HEADER_H = 48   # two-line header block
-
+HEADER_H = 48
 
 def _text(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float = 8,
           fontname: str = 'helv', color=(0, 0, 0), align: int = 1) -> None:
@@ -42,7 +40,6 @@ def _text(page: fitz.Page, rect: fitz.Rect, text: str, fontsize: float = 8,
         color=color,
     )
 
-
 def _cell(page: fitz.Page, rect: fitz.Rect, text: str,
           fontsize: float = 8, fontname: str = 'helv',
           fill=None, color=(0, 0, 0), align: int = 1,
@@ -51,7 +48,6 @@ def _cell(page: fitz.Page, rect: fitz.Rect, text: str,
         page.draw_rect(rect, color=None, fill=fill)
     page.draw_rect(rect, color=border_color, width=0.3)
     _text(page, rect, text, fontsize=fontsize, fontname=fontname, color=color, align=align)
-
 
 def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
     """Return a PDF (bytes) — one page per ~35 candidates.
@@ -74,16 +70,12 @@ def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
     doc = fitz.open()
 
     n_questions = len(questions)
-    # Dynamic page width: expand if many questions
     extra_q_cols = max(0, n_questions - 12)
     page_w = PAGE_W + extra_q_cols * COL_Q
     page_h = PAGE_H
 
-    # ── header helpers ──────────────────────────────────────────────────────
-
     def _draw_page_header(page: fitz.Page) -> float:
         """Draw school/exam header and return y where the table starts."""
-        # Blue top strip
         page.draw_rect(fitz.Rect(0, 0, page_w, 5), color=None, fill=(0.1, 0.3, 0.7))
 
         school_name = exam.school.name.upper()
@@ -130,7 +122,6 @@ def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
             r = fitz.Rect(x, y, x + COL_Q, y + ROW_H)
             page.draw_rect(r, color=None, fill=hdr_bg)
             page.draw_rect(r, color=(0.75, 0.75, 0.75), width=0.3)
-            # two tiny lines: label on top, max_marks below
             page.insert_text((x + 2, y + 10), label, fontsize=6, fontname='hebo', color=hdr_fg)
             page.insert_text((x + 2, y + 16), sub, fontsize=5.5, fontname='helv', color=(0.8, 0.9, 1.0))
             x += COL_Q
@@ -144,9 +135,7 @@ def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
 
         return y + ROW_H
 
-    # ── pagination ──────────────────────────────────────────────────────────
-
-    rows_per_page = int((page_h - 62 - ROW_H - MARGIN - 40) / ROW_H)  # 40 for footer
+    rows_per_page = int((page_h - 62 - ROW_H - MARGIN - 40) / ROW_H)
     chunks = [
         candidates_with_attempts[i:i + rows_per_page]
         for i in range(0, max(1, len(candidates_with_attempts)), rows_per_page)
@@ -194,7 +183,6 @@ def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
 
             y += ROW_H
 
-        # ── footer stats ────────────────────────────────────────────────────
         y += 6
         n = len(totals_collected)
         if n:
@@ -214,7 +202,6 @@ def generate_mark_sheet(exam, questions, candidates_with_attempts) -> bytes:
         page.insert_text((MARGIN, y + 10), footer,
                          fontsize=7.5, fontname='helv', color=(0.35, 0.35, 0.35))
 
-        # Blue bottom strip
         page.draw_rect(fitz.Rect(0, page_h - 5, page_w, page_h),
                        color=None, fill=(0.1, 0.3, 0.7))
 

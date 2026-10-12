@@ -14,7 +14,6 @@ from .models import AIExplanationRequest
 from .serializers import AIExplanationRequestSerializer, ExplainMistakeInputSerializer
 from .services import get_ai_service
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def ai_health_check(request):
@@ -25,7 +24,6 @@ def ai_health_check(request):
     talking to Ollama itself."""
     healthy = get_ai_service().health_check()
     return api_response(data={'healthy': healthy})
-
 
 class AIExplanationRequestViewSet(
     EnvelopeMixin, mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet,

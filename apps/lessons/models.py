@@ -4,8 +4,7 @@ from django.core.validators import MaxValueValidator
 from django.db import models
 
 ALLOWED_ATTACHMENT_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.gif', '.txt', '.doc', '.docx'}
-MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10MB — MVP is text/compressed images/PDFs, not video
-
+MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024
 
 class Lesson(models.Model):
     class Status(models.TextChoices):
@@ -51,7 +50,6 @@ class Lesson(models.Model):
     def __str__(self):
         return f'{self.title} ({self.school.code})'
 
-
 class LessonAssignment(models.Model):
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name='assignments')
     school_class = models.ForeignKey(
@@ -75,10 +73,8 @@ class LessonAssignment(models.Model):
     def __str__(self):
         return f'{self.lesson.title} -> {self.school_class.name}'
 
-
 def lesson_attachment_upload_path(instance, filename):
     return f'lesson_attachments/{instance.lesson.school_id}/{instance.lesson_id}/{filename}'
-
 
 class LessonAttachment(models.Model):
     """Stores metadata only — the actual bytes live in the configured file
@@ -101,22 +97,7 @@ class LessonAttachment(models.Model):
     def __str__(self):
         return f'{self.file_name} v{self.version} ({self.lesson.title})'
 
-
-# --- Mastery-based sections -------------------------------------------
-#
-# A lesson MAY be broken into sequential, gated sections instead of (or
-# alongside) its flat `content`/attachments -- fully additive, so a
-# lesson with zero sections behaves exactly as before. Each section has
-# its own content blocks and, optionally, a mini-quiz that gates access
-# to the next section. The mini-quiz deliberately reuses apps.quizzes'
-# existing Quiz/Question/QuestionOption/QuizMarkingService rather than a
-# parallel schema -- deterministic marking (never AI) comes for free,
-# and MCQ/TRUE_FALSE/MATCHING are all already supported.
-
-
 class LessonSection(models.Model):
-    # Denormalized from lesson.school, consistent with the tenant-scoping
-    # pattern used throughout (Question, LessonAttachment's parent, ...).
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='lesson_sections')
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name='sections')
     title = models.CharField(max_length=255)
@@ -138,7 +119,6 @@ class LessonSection(models.Model):
     def __str__(self):
         return f'{self.lesson.title} - Section {self.order}: {self.title}'
 
-
 class SectionContentBlock(models.Model):
     class BlockType(models.TextChoices):
         HEADING = 'HEADING', 'Heading'
@@ -149,9 +129,6 @@ class SectionContentBlock(models.Model):
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='section_content_blocks')
     section = models.ForeignKey(LessonSection, on_delete=models.CASCADE, related_name='content_blocks')
     block_type = models.CharField(max_length=10, choices=BlockType.choices)
-    # The block's text for HEADING/TEXT/KEY_POINT; the caption/alt text for
-    # an IMAGE block (the actual file lives in `image`, an already-uploaded
-    # LessonAttachment -- no second file-upload path duplicated here).
     content = models.TextField(blank=True)
     image = models.ForeignKey(
         LessonAttachment, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
@@ -177,7 +154,6 @@ class SectionContentBlock(models.Model):
     def __str__(self):
         return f'{self.section.title} - {self.block_type} #{self.order}'
 
-
 class SectionMiniQuiz(models.Model):
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='section_mini_quizzes')
     section = models.OneToOneField(LessonSection, on_delete=models.CASCADE, related_name='mini_quiz')
@@ -197,7 +173,6 @@ class SectionMiniQuiz(models.Model):
 
     def __str__(self):
         return f'Mini-quiz for {self.section.title} (pass >= {self.passing_score}%)'
-
 
 class StudentSectionProgress(models.Model):
     class Status(models.TextChoices):

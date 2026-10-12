@@ -4,7 +4,6 @@ from apps.ai.exceptions import AIServiceResponseError, AIServiceUnavailableError
 
 from .base import AIService, AIServiceResponse
 
-
 class OpenAIService(AIService):
     """Talks to OpenAI's chat completions endpoint (gpt-4o-mini by default).
     Used as the preferred AIService when OPENAI_API_KEY is set in settings —

@@ -19,7 +19,6 @@ from .serializers import (
 
 User = get_user_model()
 
-
 class LoginView(TokenObtainPairView):
     """POST /api/auth/login/ — issues an access/refresh token pair plus a
     snapshot of the authenticated user's profile."""
@@ -28,10 +27,6 @@ class LoginView(TokenObtainPairView):
     throttle_scope = 'login'
 
     def get_throttles(self):
-        # Applied explicitly (not via DEFAULT_THROTTLE_CLASSES) so it can't
-        # be bypassed by a view accidentally overriding throttle_classes --
-        # gated on THROTTLING_ENABLED so test mode can switch it off without
-        # affecting DEFAULT_THROTTLE_CLASSES (see development.py).
         if not settings.THROTTLING_ENABLED:
             return []
         return [LoginRateThrottle()]
@@ -44,7 +39,6 @@ class LoginView(TokenObtainPairView):
             raise InvalidToken(e.args[0])
         return api_response(data=serializer.validated_data, message='Login successful')
 
-
 class TokenRefreshView(BaseTokenRefreshView):
     """POST /api/auth/refresh/ — exchanges a refresh token for a new access token."""
 
@@ -56,7 +50,6 @@ class TokenRefreshView(BaseTokenRefreshView):
             raise InvalidToken(e.args[0])
         return api_response(data=serializer.validated_data, message='Token refreshed')
 
-
 class MeView(APIView):
     """GET /api/auth/me/ — the current authenticated user's profile."""
 
@@ -64,7 +57,6 @@ class MeView(APIView):
 
     def get(self, request):
         return api_response(data=UserSerializer(request.user).data)
-
 
 class LogoutView(APIView):
     """POST /api/auth/logout/ — blacklists the given refresh token so it
@@ -85,11 +77,7 @@ class LogoutView(APIView):
             raise ValidationError({'refresh': str(e)})
         return api_response(message='Logged out')
 
-
-# ── System-admin user management ─────────────────────────────────────────────
-
 _SYSTEM_ADMIN_FILTER = {'role': User.Role.ADMIN, 'admin_scope': User.AdminScope.SYSTEM}
-
 
 def _user_queryset():
     return (
@@ -98,7 +86,6 @@ def _user_queryset():
         .exclude(**_SYSTEM_ADMIN_FILTER)
         .order_by('school__name', 'role', 'last_name', 'first_name', 'username')
     )
-
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
@@ -129,7 +116,6 @@ def user_list_create(request):
     user.full_clean()
     user.save()
     return api_response(data=UserSerializer(user).data, status=201, message='User created')
-
 
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
@@ -163,7 +149,6 @@ def user_detail(request, pk):
     user.save()
     return api_response(data=UserSerializer(user).data, message='User updated')
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def school_teachers(request):
@@ -190,7 +175,6 @@ def school_teachers(request):
         for u in qs
     ]
     return api_response(data=data)
-
 
 @api_view(['POST', 'DELETE'])
 @permission_classes([IsAuthenticated])
@@ -219,7 +203,6 @@ def assign_examiner_role(request, pk):
             message='Examiner role assigned.',
         )
 
-    # DELETE
     teacher.secondary_role = None
     teacher.save(update_fields=['secondary_role'])
     return api_response(

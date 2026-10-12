@@ -25,20 +25,16 @@ from apps.classes.models import SchoolClass, StudentClassMembership, TeacherClas
 from apps.exams.models import ExamQuestion, StudentExamAnswer, StudentExamAttempt
 from apps.schools.models import School
 
-
 def make_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
 
-
 class FullLifecycleTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-        # --- Phase 3/2: schools + roster (no creation API by design --
-        # provisioning is an admin-panel/ORM operation, see Phase 20). ---
         self.school = School.objects.create(name='Lifecycle School', code='E2E-A')
         self.other_school = School.objects.create(name='Other School', code='E2E-B')
 
@@ -50,7 +46,6 @@ class FullLifecycleTests(TestCase):
         self.student = make_user(User.Role.STUDENT, school=self.school, username='e2e_student')
         self.other_student = make_user(User.Role.STUDENT, school=self.other_school, username='e2e_other_student')
 
-        # --- Phase 4/5: academic structure + class membership. ---
         self.form_2 = ClassLevel.objects.get(code='F2')
         self.subject = Subject.objects.create(school=self.school, name='Mathematics')
         self.school_class = SchoolClass.objects.create(
@@ -66,9 +61,6 @@ class FullLifecycleTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
 
     def test_full_lifecycle(self):
-        # ============================================================
-        # Phase 6: lesson authored, published, assigned to the class.
-        # ============================================================
         self.auth('e2e_teacher')
         lesson_id = self.client.post('/api/lessons/', {
             'subject': self.subject.id, 'class_level': self.form_2.id,
@@ -78,10 +70,6 @@ class FullLifecycleTests(TestCase):
         assign_resp = self.client.post(f'/api/lessons/{lesson_id}/assign/', {'school_class': self.school_class.id})
         self.assertEqual(assign_resp.status_code, 201)
 
-        # ============================================================
-        # Phase 7: quiz authored with one MCQ question, published,
-        # assigned to the class.
-        # ============================================================
         quiz_id = self.client.post('/api/quizzes/', {
             'subject': self.subject.id, 'class_level': self.form_2.id, 'title': 'Algebra Quiz',
         }).data['data']['id']
@@ -97,12 +85,6 @@ class FullLifecycleTests(TestCase):
         self.client.post(f'/api/quizzes/{quiz_id}/publish/')
         self.client.post(f'/api/quizzes/{quiz_id}/assign/', {'school_class': self.school_class.id})
 
-        # ============================================================
-        # Phase 8/9/11: student works entirely offline, then syncs a
-        # lesson-progress update and a wrong quiz attempt in ONE batch
-        # push -- deterministic marking must happen server-side, with
-        # zero AI involvement, purely from this push.
-        # ============================================================
         self.auth('e2e_student')
         push_resp = self.client.post('/api/sync/push/', {'items': [
             {
@@ -132,18 +114,10 @@ class FullLifecycleTests(TestCase):
         self.assertTrue(progress.completed)
 
         attempt = StudentQuizAttempt.objects.get(student=self.student, quiz_id=quiz_id)
-        self.assertEqual(attempt.percentage, 0)  # wrong answer, deterministic, no AI
+        self.assertEqual(attempt.percentage, 0)
         wrong_answer = StudentQuizAnswer.objects.get(attempt=attempt, question_id=question_id)
         self.assertFalse(wrong_answer.is_correct)
 
-        # ============================================================
-        # Phase 12/13: student asks AI to explain the mistake. AI is
-        # mocked -- the automated suite never depends on a real Ollama
-        # instance -- but the call still proves the whole plumbing
-        # (AIService abstraction, never a direct frontend->Ollama link)
-        # works, and that AI only ever *explains*, never touches the
-        # deterministic mark it's explaining.
-        # ============================================================
         with patch('apps.ai.explanation_service.get_ai_service') as mock_get_service:
             mock_get_service.return_value = Mock(generate=Mock(return_value=Mock(text=json.dumps({
                 'explanation': 'You added the numbers incorrectly.',
@@ -155,12 +129,8 @@ class FullLifecycleTests(TestCase):
         self.assertEqual(explain_resp.data['data']['status'], 'COMPLETED')
 
         wrong_answer.refresh_from_db()
-        self.assertFalse(wrong_answer.is_correct)  # AI never touched the mark
+        self.assertFalse(wrong_answer.is_correct)
 
-        # ============================================================
-        # Phase 14/15: exam authored, published, closed; a candidate is
-        # registered and a script uploaded.
-        # ============================================================
         self.auth('e2e_teacher')
         exam_id = self.client.post('/api/exams/', {
             'subject': self.subject.id, 'class_level': self.form_2.id,
@@ -191,12 +161,6 @@ class FullLifecycleTests(TestCase):
         }, format='multipart')
         self.assertEqual(upload_resp.status_code, 201)
 
-        # ============================================================
-        # Phase 16/17: mixed deterministic + AI-assisted marking, with
-        # mandatory teacher review -- the AI call populates ai_marks_
-        # awarded but must NEVER set teacher_final_marks itself; only
-        # the teacher's own explicit 'mark' action does that.
-        # ============================================================
         script_id = self.client.get(f'/api/exams/{exam_id}/scripts/').data['data'][0]['id']
         attempt_ex = StudentExamAttempt.objects.get(exam_id=exam_id, student=self.student)
         objective_answer_id = StudentExamAnswer.objects.get(attempt=attempt_ex, exam_question_id=objective_q_id).id
@@ -216,27 +180,18 @@ class FullLifecycleTests(TestCase):
 
         subjective_answer = StudentExamAnswer.objects.get(id=subjective_answer_id)
         self.assertEqual(subjective_answer.ai_marks_awarded, 7)
-        self.assertIsNone(subjective_answer.teacher_final_marks)  # AI never finalizes a mark
+        self.assertIsNone(subjective_answer.teacher_final_marks)
 
-        # Teacher reviews both: records the deterministic objective
-        # answer, and makes their OWN explicit decision on the subjective
-        # one (here, accepting the AI's suggestion -- but it's their
-        # action, not the AI's, that writes teacher_final_marks).
         self.client.post(f'/api/exams/answers/{objective_answer_id}/mark/', {'recorded_answer': 'Dodoma'})
         self.client.post(f'/api/exams/answers/{subjective_answer_id}/mark/', {'teacher_final_marks': 7})
 
         self.client.post(f'/api/exams/scripts/{script_id}/submit-for-review/')
 
-        # Finalize and publish are EXAM_MARKING_MANAGER-only actions.
         self.auth('e2e_manager')
         finalize_resp = self.client.post(f'/api/exams/scripts/{script_id}/finalize/')
         self.assertEqual(finalize_resp.status_code, 200)
         self.assertEqual(finalize_resp.data['data']['status'], 'FINALIZED')
 
-        # ============================================================
-        # Phase 18: results published, student can now see them (not
-        # before).
-        # ============================================================
         publish_resp = self.client.post(f'/api/exams/scripts/{script_id}/publish/')
         self.assertEqual(publish_resp.status_code, 200)
 
@@ -244,12 +199,9 @@ class FullLifecycleTests(TestCase):
         results = self.client.get('/api/exams/results/')
         self.assertEqual(results.data['data']['count'], 1)
         published_result = results.data['data']['results'][0]
-        self.assertEqual(float(published_result['score']), 12)  # 5 (objective) + 7 (subjective teacher mark)
+        self.assertEqual(float(published_result['score']), 12)
         self.assertEqual(published_result['total_marks'], 15)
 
-        # ============================================================
-        # Phase 19: analytics reflect everything that just happened.
-        # ============================================================
         self.auth('e2e_teacher')
         quiz_perf = self.client.get('/api/analytics/teacher/quizzes/').data['data']
         self.assertEqual(quiz_perf[0]['attempt_count'], 1)
@@ -267,12 +219,6 @@ class FullLifecycleTests(TestCase):
         self.assertEqual(overview['student_count'], 1)
         self.assertEqual(overview['teacher_count'], 1)
 
-        # ============================================================
-        # Phase 3/20: a student at a completely different school gets
-        # nothing from any of this, at every layer that matters --
-        # tenant isolation holds across the whole flow, not just at one
-        # spot-checked endpoint.
-        # ============================================================
         self.auth('e2e_other_student')
         self.assertEqual(self.client.get('/api/lessons/').data['data']['count'], 0)
         self.assertEqual(self.client.get('/api/quizzes/').data['data']['count'], 0)

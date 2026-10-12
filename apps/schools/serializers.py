@@ -5,7 +5,6 @@ from .models import School
 
 User = get_user_model()
 
-
 class SchoolSerializer(serializers.ModelSerializer):
     class Meta:
         model = School
@@ -13,11 +12,7 @@ class SchoolSerializer(serializers.ModelSerializer):
             'id', 'name', 'code', 'address', 'phone_number', 'email',
             'is_active', 'created_at', 'updated_at',
         ]
-        # is_active is changed only via the explicit activate/deactivate
-        # actions, never through a generic update — keeps deactivation
-        # an intentional, auditable action rather than an incidental PATCH.
         read_only_fields = ['id', 'is_active', 'created_at', 'updated_at']
-
 
 class SchoolAdminCreateSerializer(serializers.ModelSerializer):
     """Creates a SCHOOL-scoped admin for a school. The `school` itself is
@@ -45,7 +40,6 @@ class SchoolAdminCreateSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-
 class _SchoolStaffCreateSerializer(serializers.ModelSerializer):
     """Shared shape for TeacherCreateSerializer/StudentCreateSerializer --
     same fields and creation logic as SchoolAdminCreateSerializer, just a
@@ -53,7 +47,7 @@ class _SchoolStaffCreateSerializer(serializers.ModelSerializer):
     still comes only from serializer context, never the request body."""
 
     password = serializers.CharField(write_only=True, min_length=8)
-    role = None  # set on each subclass
+    role = None
 
     class Meta:
         model = User
@@ -68,10 +62,8 @@ class _SchoolStaffCreateSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-
 class TeacherCreateSerializer(_SchoolStaffCreateSerializer):
     role = User.Role.TEACHER
-
 
 class StudentCreateSerializer(_SchoolStaffCreateSerializer):
     role = User.Role.STUDENT

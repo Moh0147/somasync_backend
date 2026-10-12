@@ -5,14 +5,12 @@ from apps.accounts.models import User
 
 from .models import School
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class SchoolTenantIsolationTests(TestCase):
     """Phase 3's core requirement: School A must never be able to see,
@@ -39,8 +37,6 @@ class SchoolTenantIsolationTests(TestCase):
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
 
-    # --- creation: SYSTEM admin only ---
-
     def test_system_admin_can_create_school(self):
         self.auth('sysadmin')
         response = self.client.post(
@@ -64,8 +60,6 @@ class SchoolTenantIsolationTests(TestCase):
         response = self.client.get('/api/schools/')
         self.assertEqual(response.status_code, 401)
 
-    # --- listing: tenant-scoped queryset ---
-
     def test_system_admin_sees_all_schools(self):
         self.auth('sysadmin')
         response = self.client.get('/api/schools/')
@@ -83,8 +77,6 @@ class SchoolTenantIsolationTests(TestCase):
         response = self.client.get('/api/schools/')
         codes = {s['code'] for s in response.data['data']['results']}
         self.assertEqual(codes, {'SCA001'})
-
-    # --- retrieve: cross-school must 404, never leak existence ---
 
     def test_school_admin_can_retrieve_own_school(self):
         self.auth('admin_a')
@@ -111,8 +103,6 @@ class SchoolTenantIsolationTests(TestCase):
         response = self.client.get(f'/api/schools/{self.school_b.id}/')
         self.assertEqual(response.status_code, 200)
 
-    # --- update: SYSTEM admin only ---
-
     def test_system_admin_can_update_any_school(self):
         self.auth('sysadmin')
         response = self.client.patch(f'/api/schools/{self.school_b.id}/', {'name': 'Renamed B'})
@@ -129,8 +119,6 @@ class SchoolTenantIsolationTests(TestCase):
         response = self.client.patch(f'/api/schools/{self.school_b.id}/', {'name': 'Hacked B'})
         self.assertIn(response.status_code, (403, 404))
 
-    # --- deactivate/activate: SYSTEM admin only ---
-
     def test_system_admin_can_deactivate_school(self):
         self.auth('sysadmin')
         response = self.client.post(f'/api/schools/{self.school_b.id}/deactivate/')
@@ -142,8 +130,6 @@ class SchoolTenantIsolationTests(TestCase):
         self.auth('admin_a')
         response = self.client.post(f'/api/schools/{self.school_a.id}/deactivate/')
         self.assertEqual(response.status_code, 403)
-
-    # --- managing school admins ---
 
     def test_system_admin_can_create_school_admin_for_any_school(self):
         self.auth('sysadmin')
@@ -170,7 +156,6 @@ class SchoolTenantIsolationTests(TestCase):
             f'/api/schools/{self.school_b.id}/admins/',
             {'username': 'sneaky_admin_b', 'password': 'strongpass123'},
         )
-        # Can't even see that school B exists -> 404, not 403.
         self.assertEqual(response.status_code, 404)
 
     def test_injected_school_id_in_body_is_ignored(self):

@@ -1,6 +1,5 @@
 from rest_framework.views import exception_handler as drf_exception_handler
 
-
 def custom_exception_handler(exc, context):
     """Wrap DRF's default exception handler so every error response shares
     the same envelope: {"success": false, "errors": ...}."""

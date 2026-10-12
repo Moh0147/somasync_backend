@@ -2,7 +2,6 @@ import hashlib
 
 from rest_framework.response import Response
 
-
 def api_response(data=None, message=None, status=200):
     """Standard success envelope: {"success": true, "message": ..., "data": ...}."""
     payload = {'success': True}
@@ -11,7 +10,6 @@ def api_response(data=None, message=None, status=200):
     if data is not None:
         payload['data'] = data
     return Response(payload, status=status)
-
 
 def compute_file_checksum(uploaded_file):
     """SHA-256 of an uploaded file, streamed via .chunks() rather than

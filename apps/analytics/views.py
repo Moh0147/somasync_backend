@@ -33,20 +33,15 @@ from common.utils import api_response
 
 User = get_user_model()
 
-
-# --- shared helpers -------------------------------------------------
-
 def _avg_quiz_percentage_for_students(student_ids):
     return StudentQuizAttempt.objects.filter(
         student_id__in=student_ids, percentage__isnull=False,
     ).aggregate(avg=Avg('percentage'))['avg']
 
-
 def _avg_exam_percentage_for_students(student_ids):
     return StudentExamAttempt.objects.filter(
         student_id__in=student_ids, percentage__isnull=False,
     ).aggregate(avg=Avg('percentage'))['avg']
-
 
 def _lesson_completion_rate_for_students(student_ids):
     stats = LessonProgress.objects.filter(student_id__in=student_ids).aggregate(
@@ -55,7 +50,6 @@ def _lesson_completion_rate_for_students(student_ids):
     if not stats['total']:
         return None
     return round(stats['completed'] / stats['total'] * 100, 2)
-
 
 def _class_summary(school_class):
     student_ids = StudentClassMembership.objects.filter(
@@ -70,16 +64,12 @@ def _class_summary(school_class):
         'avg_exam_percentage': _avg_exam_percentage_for_students(student_ids),
     }
 
-
-# --- teacher analytics ------------------------------------------------
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_class_performance(request):
     """Class average: one row per class this teacher is assigned to."""
     classes = SchoolClass.objects.filter(teacher_memberships__teacher=request.user).distinct()
     return api_response(data=[_class_summary(c) for c in classes])
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
@@ -133,7 +123,6 @@ def teacher_student_performance(request):
         })
     return api_response(data=results)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_quiz_performance(request):
@@ -149,7 +138,6 @@ def teacher_quiz_performance(request):
             'attempt_count': stats['attempt_count'], 'avg_percentage': stats['avg_percentage'],
         })
     return api_response(data=results)
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
@@ -177,7 +165,6 @@ def teacher_question_performance(request, quiz_id):
         })
     return api_response(data=results)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_lesson_completion(request):
@@ -198,7 +185,6 @@ def teacher_lesson_completion(request):
         })
     return api_response(data=results)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_exam_performance(request):
@@ -215,9 +201,6 @@ def teacher_exam_performance(request):
             'candidate_count': exam.candidate_count, 'avg_percentage': avg_percentage,
         })
     return api_response(data=results)
-
-
-# --- school admin analytics --------------------------------------------
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
@@ -238,7 +221,6 @@ def school_overview(request):
         'lesson_completion_rate': _lesson_completion_rate_for_students(student_ids),
     })
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
 def school_class_performance(request):
@@ -246,7 +228,6 @@ def school_class_performance(request):
     (broader than a single teacher's view — every class, any teacher)."""
     classes = SchoolClass.objects.filter(school=request.user.school)
     return api_response(data=[_class_summary(c) for c in classes])
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
@@ -268,9 +249,6 @@ def school_subject_performance(request):
         })
     return api_response(data=results)
 
-
-# --- system admin analytics ---------------------------------------------
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_schools(request):
@@ -287,7 +265,6 @@ def system_schools(request):
         'admin_count': s.admin_count, 'class_count': s.class_count,
     } for s in schools])
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_users(request):
@@ -298,7 +275,6 @@ def system_users(request):
         'active_users': User.objects.filter(is_active=True).count(),
         'by_role': {row['role']: row['count'] for row in by_role},
     })
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
@@ -325,7 +301,6 @@ def system_user_directory(request):
         'is_active': user.is_active,
         'date_joined': user.date_joined,
     } for user in users])
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])

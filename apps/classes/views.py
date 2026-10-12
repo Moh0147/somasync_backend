@@ -14,7 +14,6 @@ from .serializers import AssignMemberSerializer, JoinClassSerializer, SchoolClas
 
 User = get_user_model()
 
-
 class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
     """/api/classes/ — school-owned. Admins (system/school) manage class
     definitions; any authenticated user in the same school can view them.
@@ -46,8 +45,6 @@ class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelV
         self._validate_unique_name(school, name, academic_year, exclude_pk=serializer.instance.pk)
         serializer.save(school=school)
 
-    # --- teacher membership ---
-
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='teachers', permission_classes=[IsAuthenticated])
     def teachers(self, request, pk=None):
         school_class = self.get_object()
@@ -75,8 +72,6 @@ class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelV
         if not deleted:
             raise ValidationError('This teacher is not assigned to this class.')
         return api_response(message='Teacher unassigned')
-
-    # --- student membership (admin-managed) ---
 
     @action(detail=True, methods=['get', 'post', 'delete'], url_path='students', permission_classes=[IsAuthenticated])
     def students(self, request, pk=None):
@@ -106,8 +101,6 @@ class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelV
             raise ValidationError('This student is not enrolled in this class.')
         return api_response(message='Student unenrolled')
 
-    # --- student self-join via class code ---
-
     @action(detail=False, methods=['post'], url_path='join', permission_classes=[IsAuthenticated, IsStudent])
     def join(self, request):
         serializer = JoinClassSerializer(data=request.data)
@@ -115,10 +108,6 @@ class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelV
         code = serializer.validated_data['class_code']
 
         school_class = SchoolClass.objects.filter(class_code=code).first()
-        # Same generic error whether the code doesn't exist at all, or
-        # exists but belongs to a different school — a valid code must
-        # never let a student confirm another school's data, let alone
-        # cross into it.
         if school_class is None or school_class.school_id != request.user.school_id:
             raise ValidationError({'class_code': 'Invalid class code.'})
 
@@ -132,8 +121,6 @@ class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelV
         return api_response(
             data=SchoolClassSerializer(school_class).data, message='Joined class', status=status.HTTP_201_CREATED,
         )
-
-    # --- helpers ---
 
     def _is_school_or_system_admin(self, user, school_class):
         return is_system_admin(user) or (user.role == User.Role.ADMIN and user.school_id == school_class.school_id)

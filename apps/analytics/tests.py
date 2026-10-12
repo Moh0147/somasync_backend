@@ -10,14 +10,12 @@ from apps.progress.models import LessonProgress
 from apps.quizzes.models import Question, QuestionOption, Quiz, StudentQuizAnswer, StudentQuizAttempt
 from apps.schools.models import School
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class AnalyticsTestBase(TestCase):
     def setUp(self):
@@ -44,7 +42,6 @@ class AnalyticsTestBase(TestCase):
         StudentClassMembership.objects.create(school_class=self.class_a, student=self.student_a)
         StudentClassMembership.objects.create(school_class=self.class_a, student=self.student_a2)
 
-        # Quiz + one question, one attempt scoring 100%, one scoring 0%.
         self.quiz = Quiz.objects.create(
             school=self.school_a, subject=self.subject_a, class_level=self.form_2,
             title='Algebra Quiz', created_by=self.teacher_a, status=Quiz.Status.PUBLISHED,
@@ -73,7 +70,6 @@ class AnalyticsTestBase(TestCase):
             selected_option=self.wrong_option, is_correct=False, marks_awarded=0,
         )
 
-        # Lesson + progress: one completed, one not.
         self.lesson = Lesson.objects.create(
             school=self.school_a, subject=self.subject_a, class_level=self.form_2,
             title='Intro to Algebra', created_by=self.teacher_a, status=Lesson.Status.PUBLISHED,
@@ -87,7 +83,6 @@ class AnalyticsTestBase(TestCase):
             progress_percentage=40, completed=False,
         )
 
-        # Exam + one finalized-ish attempt (80%).
         self.exam = Exam.objects.create(
             school=self.school_a, subject=self.subject_a, class_level=self.form_2,
             title='Midterm Exam', academic_year=2026, created_by=self.teacher_a,
@@ -105,7 +100,6 @@ class AnalyticsTestBase(TestCase):
         access = login.data['data']['access']
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access}')
 
-
 class TeacherAnalyticsTests(AnalyticsTestBase):
     def setUp(self):
         super().setUp()
@@ -119,7 +113,7 @@ class TeacherAnalyticsTests(AnalyticsTestBase):
         row = rows[0]
         self.assertEqual(row['class_id'], self.class_a.id)
         self.assertEqual(row['student_count'], 2)
-        self.assertEqual(float(row['avg_quiz_percentage']), 50.0)  # (100 + 0) / 2
+        self.assertEqual(float(row['avg_quiz_percentage']), 50.0)
 
     def test_student_performance(self):
         response = self.client.get('/api/analytics/teacher/students/')
@@ -196,7 +190,6 @@ class TeacherAnalyticsTests(AnalyticsTestBase):
         response = self.client.get('/api/analytics/teacher/classes/')
         self.assertEqual(response.status_code, 403)
 
-
 class SchoolAdminAnalyticsTests(AnalyticsTestBase):
     def setUp(self):
         super().setUp()
@@ -247,12 +240,9 @@ class SchoolAdminAnalyticsTests(AnalyticsTestBase):
         self.assertEqual(response.status_code, 403)
 
     def test_system_admin_cannot_use_school_admin_endpoint(self):
-        # SYSTEM admin has no `school`, so this endpoint (deliberately
-        # scoped to a SCHOOL-scoped admin) is off-limits -- not a superset.
         self.auth('an_sysadmin')
         response = self.client.get('/api/analytics/school/overview/')
         self.assertEqual(response.status_code, 403)
-
 
 class SystemAdminAnalyticsTests(AnalyticsTestBase):
     def setUp(self):

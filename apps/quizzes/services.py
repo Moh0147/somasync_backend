@@ -6,7 +6,6 @@ from rest_framework.exceptions import ValidationError
 
 from .models import Question, QuestionOption, Quiz, StudentQuizAnswer, StudentQuizAttempt
 
-
 class QuizMarkingService:
     """Deterministic marking for MCQ / TRUE_FALSE / MATCHING questions —
     the ONLY marking path for normal quizzes. Never calls AI: every result
@@ -49,13 +48,6 @@ class QuizMarkingService:
         attempt.percentage = percentage.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         attempt.save(update_fields=['score', 'total_marks', 'percentage', 'updated_at'])
 
-        # The caller (e.g. a DRF view that fetched `attempt` via a
-        # queryset with prefetch_related('answers')) may be holding a
-        # stale prefetch cache of the answers we just updated via a
-        # separate query above — updating those fresh objects doesn't
-        # retroactively update the cached ones. Clear it so a subsequent
-        # `attempt.answers.all()` (e.g. serialization) re-queries and sees
-        # the marked values.
         if hasattr(attempt, '_prefetched_objects_cache'):
             attempt._prefetched_objects_cache.pop('answers', None)
 
@@ -64,7 +56,6 @@ class QuizMarkingService:
     @classmethod
     def _mark_question(cls, question, answer):
         if answer is None:
-            # Unanswered -- a deterministic zero, not an error.
             return Decimal('0'), False
 
         if question.question_type in (Question.Type.MCQ, Question.Type.TRUE_FALSE):
@@ -72,14 +63,12 @@ class QuizMarkingService:
         if question.question_type == Question.Type.MATCHING:
             return cls._mark_matching_question(question, answer)
 
-        # Unknown question_type: never guess a score.
         return Decimal('0'), False
 
     @classmethod
     def _mark_choice_question(cls, question, answer):
         option = answer.selected_option
         if option is None or option.question_id != question.id:
-            # Invalid/dangling answer (e.g. references the wrong question) -- 0, not a crash.
             return Decimal('0'), False
         if option.is_correct:
             return Decimal(question.marks), True
@@ -98,12 +87,10 @@ class QuizMarkingService:
         marks_awarded = Decimal(question.marks) * correct_count / len(pairs)
         return marks_awarded, is_correct
 
-
 def quiz_assigned_to_student(quiz, student):
     from apps.classes.models import StudentClassMembership
     class_ids = StudentClassMembership.objects.filter(student=student).values_list('school_class_id', flat=True)
     return quiz.assignments.filter(school_class_id__in=class_ids).exists()
-
 
 def validate_quiz_for_attempt(quiz_id, user):
     """Shared by the live `start`/`sync` actions (Phase 8) and the generic
@@ -114,8 +101,6 @@ def validate_quiz_for_attempt(quiz_id, user):
         quiz = Quiz.objects.get(pk=quiz_id)
     except Quiz.DoesNotExist:
         raise ValidationError({'quiz': 'No such quiz.'})
-    # Same generic message for "doesn't exist" and "wrong school" — a
-    # cross-school attempt must never confirm the quiz's existence.
     if quiz.school_id != user.school_id:
         raise ValidationError({'quiz': 'No such quiz.'})
     if quiz.status != Quiz.Status.PUBLISHED:
@@ -123,7 +108,6 @@ def validate_quiz_for_attempt(quiz_id, user):
     if not quiz_assigned_to_student(quiz, user):
         raise ValidationError({'quiz': 'This quiz is not assigned to any of your classes.'})
     return quiz
-
 
 def save_quiz_answer(attempt, answer_data):
     """Upserts one StudentQuizAnswer for `attempt`. Raises ValidationError
@@ -158,7 +142,6 @@ def save_quiz_answer(attempt, answer_data):
             'matching_response': matching_response,
         },
     )
-
 
 def sync_quiz_attempt(user, data):
     """Core logic behind offline batch sync of one quiz attempt. Used by

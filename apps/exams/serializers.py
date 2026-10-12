@@ -6,7 +6,6 @@ from .models import (
     StudentExamAnswer, StudentExamAttempt,
 )
 
-
 class ExamSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exam
@@ -17,18 +16,13 @@ class ExamSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'status', 'created_by', 'published_at', 'created_at', 'updated_at']
         extra_kwargs = {'school': {'required': False}}
-        # See Phase 4/6/7 notes: the auto unique-together validator would
-        # otherwise force `school` to be required, breaking the deferred
-        # school-injection pattern. Checked manually in the view instead.
         validators = []
-
 
 class MarkingSchemeItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarkingSchemeItem
         fields = ['id', 'criterion', 'description', 'marks', 'order', 'marks_source']
         read_only_fields = ['id']
-
 
 class ExamQuestionSerializer(serializers.ModelSerializer):
     marking_scheme_items = MarkingSchemeItemSerializer(many=True, read_only=True)
@@ -40,17 +34,13 @@ class ExamQuestionSerializer(serializers.ModelSerializer):
             'question_type', 'max_marks', 'correct_answer', 'is_compulsory', 'learning_objective', 'order',
             'marking_scheme_items', 'created_at', 'updated_at',
         ]
-        # `school`/`created_by` are always derived from `exam` — never
-        # independently choosable, same as quizzes.Question.
         read_only_fields = ['id', 'school', 'created_by', 'marking_scheme_items', 'created_at', 'updated_at']
-
 
 class ExamCandidateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExamCandidate
         fields = ['id', 'exam', 'student', 'candidate_number', 'created_at']
         read_only_fields = fields
-
 
 class StudentCandidateNumberSerializer(serializers.ModelSerializer):
     exam_title = serializers.CharField(source='exam.title', read_only=True)
@@ -62,11 +52,9 @@ class StudentCandidateNumberSerializer(serializers.ModelSerializer):
         fields = ['id', 'candidate_number', 'exam_title', 'exam_date', 'academic_year', 'created_at']
         read_only_fields = fields
 
-
 class ExamCandidateInputSerializer(serializers.Serializer):
     student = serializers.IntegerField()
     candidate_number = serializers.CharField(max_length=20)
-
 
 class ExamScriptPageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -81,7 +69,6 @@ class ExamScriptPageSerializer(serializers.ModelSerializer):
             return obj.image.url
         except ValueError:
             return obj.image.name
-
 
 class ExamScriptSerializer(serializers.ModelSerializer):
     file_reference = serializers.SerializerMethodField()
@@ -105,7 +92,6 @@ class ExamScriptSerializer(serializers.ModelSerializer):
         except ValueError:
             return obj.file.name
 
-
 class StudentExamAnswerSerializer(serializers.ModelSerializer):
     question_number = serializers.CharField(source='exam_question.question_number', read_only=True)
     question_text = serializers.CharField(source='exam_question.question_text', read_only=True)
@@ -123,7 +109,6 @@ class StudentExamAnswerSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-
 class MarkAnswerInputSerializer(serializers.Serializer):
     """For an OBJECTIVE question: send `recorded_answer` and the answer is
     marked deterministically (ExamMarkingService), no marks needed. For a
@@ -134,7 +119,6 @@ class MarkAnswerInputSerializer(serializers.Serializer):
     recorded_answer = serializers.CharField(required=False, allow_blank=True)
     teacher_final_marks = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, min_value=0)
     teacher_comment = serializers.CharField(required=False, allow_blank=True)
-
 
 class ExamResultAnswerSerializer(serializers.ModelSerializer):
     """Student-facing: only the confirmed mark and the teacher's own
@@ -151,7 +135,6 @@ class ExamResultAnswerSerializer(serializers.ModelSerializer):
         fields = ['id', 'question_number', 'question_text', 'max_marks', 'teacher_final_marks', 'teacher_comment']
         read_only_fields = fields
 
-
 class ExamResultSerializer(serializers.ModelSerializer):
     exam_title = serializers.CharField(source='exam.title', read_only=True)
     candidate_number = serializers.CharField(source='candidate.candidate_number', read_only=True)
@@ -165,7 +148,6 @@ class ExamResultSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-
 class StudentExamAttemptSerializer(serializers.ModelSerializer):
     answers = StudentExamAnswerSerializer(many=True, read_only=True)
 
@@ -176,7 +158,6 @@ class StudentExamAttemptSerializer(serializers.ModelSerializer):
             'score', 'total_marks', 'percentage', 'answers', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
-
 
 class ExamScriptAssignmentSerializer(serializers.ModelSerializer):
     assignee_username = serializers.CharField(source='assignee.username', read_only=True)
@@ -193,7 +174,6 @@ class ExamScriptAssignmentSerializer(serializers.ModelSerializer):
 
     def get_assignee_full_name(self, obj) -> str:
         return f'{obj.assignee.first_name} {obj.assignee.last_name}'.strip() or obj.assignee.username
-
 
 class MarkingAuditLogSerializer(serializers.ModelSerializer):
     action_label = serializers.CharField(source='get_action_display', read_only=True)
@@ -219,5 +199,4 @@ class MarkingAuditLogSerializer(serializers.ModelSerializer):
             except Exception:
                 pass
         return ''
-
 

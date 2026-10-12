@@ -13,14 +13,12 @@ from .models import (
     StudentSectionProgress,
 )
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class LessonsTestBase(TestCase):
     def setUp(self):
@@ -61,7 +59,6 @@ class LessonsTestBase(TestCase):
         }
         payload.update(overrides)
         return self.client.post('/api/lessons/', payload)
-
 
 class TeacherPermissionTests(LessonsTestBase):
     def test_teacher_can_create_lesson(self):
@@ -149,7 +146,6 @@ class TeacherPermissionTests(LessonsTestBase):
         response = self.create_lesson(topic=other_topic.id, learning_objective=self.objective_a.id)
         self.assertEqual(response.status_code, 400)
 
-
 class SchoolAdminPermissionTests(LessonsTestBase):
     def test_admin_can_see_all_lessons_in_school_regardless_of_status(self):
         self.auth('ls_teacher_a')
@@ -186,7 +182,6 @@ class SchoolAdminPermissionTests(LessonsTestBase):
             'subject': self.subject_a.id, 'class_level': self.form_2.id, 'title': 'X',
         })
         self.assertEqual(response.status_code, 400)
-
 
 class PublicationWorkflowTests(LessonsTestBase):
     def test_publish_sets_status_and_published_at(self):
@@ -267,7 +262,6 @@ class PublicationWorkflowTests(LessonsTestBase):
         response = self.client.post(f'/api/lessons/{lesson_id}/assign/', {'school_class': self.class_a.id})
         self.assertEqual(response.status_code, 403)
 
-
 class AttachmentValidationTests(LessonsTestBase):
     def setUp(self):
         super().setUp()
@@ -337,7 +331,6 @@ class AttachmentValidationTests(LessonsTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(LessonAttachment.objects.filter(id=attachment_id).exists())
 
-
 class CrossSchoolIsolationTests(LessonsTestBase):
     def test_teacher_cannot_create_lesson_with_other_school_subject(self):
         self.auth('ls_teacher_a')
@@ -366,9 +359,6 @@ class CrossSchoolIsolationTests(LessonsTestBase):
     def test_unauthenticated_cannot_access_lessons(self):
         response = self.client.get('/api/lessons/')
         self.assertEqual(response.status_code, 401)
-
-
-# --- mastery-based sections ---------------------------------------------
 
 class SectionsTestBase(LessonsTestBase):
     """A published lesson with two sections: Section 1 has a content block
@@ -420,7 +410,6 @@ class SectionsTestBase(LessonsTestBase):
         return self.client.post(f'/api/lessons/sections/{section_id}/submit-quiz/', {
             'answers': [{'question': self.question_id, 'selected_option': option_id}],
         }, format='json')
-
 
 class SectionAuthoringTests(SectionsTestBase):
     def test_teacher_can_list_sections_for_their_lesson(self):
@@ -515,7 +504,6 @@ class SectionAuthoringTests(SectionsTestBase):
         self.assertEqual(quiz.subject_id, self.subject_a.id)
         self.assertEqual(SectionMiniQuiz.objects.get(section_id=self.section1_id).quiz_id, quiz.id)
 
-
 class LessonStructureEndpointTests(SectionsTestBase):
     def test_first_section_available_second_locked_for_fresh_student(self):
         self.auth('ls_student_a')
@@ -550,7 +538,6 @@ class LessonStructureEndpointTests(SectionsTestBase):
         response = self.client.get(f'/api/lessons/{self.lesson_id}/structure/')
         self.assertEqual(response.status_code, 404)
 
-
 class SectionContentEndpointTests(SectionsTestBase):
     def test_available_section_content_accessible(self):
         self.auth('ls_student_a')
@@ -570,7 +557,6 @@ class SectionContentEndpointTests(SectionsTestBase):
         self.assertTrue(all('is_correct' not in opt for opt in options))
 
     def test_section_with_no_mini_quiz_returns_null(self):
-        # Unlock section 2 first by passing section 1.
         self.submit(self.section1_id, self.correct_option_id)
         self.auth('ls_student_a')
         response = self.client.get(f'/api/lessons/sections/{self.section2_id}/content/')
@@ -580,7 +566,6 @@ class SectionContentEndpointTests(SectionsTestBase):
         self.auth('ls_teacher_a')
         response = self.client.get(f'/api/lessons/sections/{self.section1_id}/content/')
         self.assertEqual(response.status_code, 403)
-
 
 class SubmitSectionQuizTests(SectionsTestBase):
     def test_passing_promotes_an_existing_locked_next_section(self):
@@ -626,7 +611,7 @@ class SubmitSectionQuizTests(SectionsTestBase):
 
     def test_second_section_is_not_unlocked_until_first_is_passed(self):
         self.submit(self.section1_id, self.wrong_option_id)
-        response = self.submit(self.section2_id, self.wrong_option_id)  # section2 has no mini-quiz anyway
+        response = self.submit(self.section2_id, self.wrong_option_id)
         self.assertEqual(response.status_code, 403)
 
     def test_attempts_counter_increments_across_retries(self):
@@ -642,13 +627,13 @@ class SubmitSectionQuizTests(SectionsTestBase):
         self.assertFalse(response.data['data']['next_section_unlocked'])
 
     def test_best_score_keeps_the_highest_attempt(self):
-        self.submit(self.section1_id, self.wrong_option_id)  # 0%
-        self.submit(self.section1_id, self.correct_option_id)  # 100%
+        self.submit(self.section1_id, self.wrong_option_id)
+        self.submit(self.section1_id, self.correct_option_id)
         progress = StudentSectionProgress.objects.get(student=self.student_a, section_id=self.section1_id)
         self.assertEqual(progress.best_score, 100)
 
     def test_cannot_submit_quiz_for_section_with_no_mini_quiz(self):
-        self.submit(self.section1_id, self.correct_option_id)  # unlock section 2
+        self.submit(self.section1_id, self.correct_option_id)
         self.auth('ls_student_a')
         response = self.client.post(f'/api/lessons/sections/{self.section2_id}/submit-quiz/', {
             'answers': [],
@@ -658,7 +643,7 @@ class SubmitSectionQuizTests(SectionsTestBase):
     def test_cannot_submit_quiz_while_mini_quiz_still_draft(self):
         self.auth('ls_teacher_a')
         self.client.post(f'/api/lessons/sections/{self.section2_id}/mini-quiz/', {'passing_score': 70})
-        response = self.submit(self.section2_id, self.wrong_option_id)  # section2 locked anyway -> 403 first
+        response = self.submit(self.section2_id, self.wrong_option_id)
         self.assertEqual(response.status_code, 403)
 
     def test_teacher_cannot_submit_quiz(self):
@@ -666,12 +651,11 @@ class SubmitSectionQuizTests(SectionsTestBase):
         self.assertEqual(response.status_code, 403)
 
     def test_unauthenticated_cannot_submit_quiz(self):
-        self.client.credentials()  # clear the teacher credentials left over from setUp
+        self.client.credentials()
         response = self.client.post(f'/api/lessons/sections/{self.section1_id}/submit-quiz/', {
             'answers': [],
         }, format='json')
         self.assertEqual(response.status_code, 401)
-
 
 class SectionCrossSchoolIsolationTests(SectionsTestBase):
     def test_other_school_student_cannot_view_content(self):

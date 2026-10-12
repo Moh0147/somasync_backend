@@ -11,13 +11,11 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from .models import Exam, ExamScript
 
-
 def _get_client_ip(request: HttpRequest) -> str | None:
     forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if forwarded_for:
         return forwarded_for.split(',')[0].strip()
     return request.META.get('REMOTE_ADDR')
-
 
 def log_marking_action(
     request: HttpRequest,

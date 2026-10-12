@@ -10,7 +10,6 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
-
 class ProjectFoundationTests(TestCase):
     def test_project_settings_load(self):
         self.assertTrue(settings.configured)
@@ -28,12 +27,10 @@ class ProjectFoundationTests(TestCase):
     def test_database_engine_is_postgresql(self):
         self.assertEqual(settings.DATABASES['default']['ENGINE'], 'django.db.backends.postgresql')
 
-
 class DatabaseConnectionTests(TestCase):
     def test_database_connection_is_usable(self):
         connection.ensure_connection()
         self.assertTrue(connection.is_usable())
-
 
 class HealthEndpointTests(TestCase):
     def test_health_endpoint_returns_ok(self):
@@ -46,7 +43,6 @@ class HealthEndpointTests(TestCase):
     def test_health_endpoint_does_not_require_auth(self):
         response = APIClient().get('/api/health/')
         self.assertNotEqual(response.status_code, 401)
-
 
 class JWTConfigurationTests(TestCase):
     def test_simple_jwt_settings_present(self):
@@ -68,7 +64,6 @@ class JWTConfigurationTests(TestCase):
 
         self.assertEqual(resolved_user, user)
 
-
 class BasicAPITests(TestCase):
     def test_admin_login_page_loads(self):
         response = APIClient().get('/admin/login/')
@@ -77,7 +72,6 @@ class BasicAPITests(TestCase):
     def test_unknown_endpoint_returns_404(self):
         response = APIClient().get('/api/does-not-exist/')
         self.assertEqual(response.status_code, 404)
-
 
 class ExceptionHandlerTests(TestCase):
     def test_custom_exception_handler_wraps_drf_errors(self):
@@ -90,7 +84,6 @@ class ExceptionHandlerTests(TestCase):
         self.assertIsNotNone(response)
         self.assertFalse(response.data['success'])
         self.assertIn('errors', response.data)
-
 
 class ProductionSettingsTests(TestCase):
     """Phase 20's production.py boot-time guards (weak SECRET_KEY, missing

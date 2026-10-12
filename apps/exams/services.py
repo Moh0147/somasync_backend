@@ -2,7 +2,6 @@ from django.utils import timezone
 
 from .models import ExamQuestion
 
-
 class ExamMarkingService:
     """Deterministic marking for OBJECTIVE exam questions. SUBJECTIVE
     questions are prepared here (the ai_marks_awarded/ai_feedback slots

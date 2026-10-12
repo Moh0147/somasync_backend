@@ -2,12 +2,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-
 @dataclass
 class AIServiceResponse:
     text: str
     raw: dict[str, Any] = field(default_factory=dict)
-
 
 class AIService(ABC):
     """Abstraction over an LLM backend. A concrete implementation (e.g.

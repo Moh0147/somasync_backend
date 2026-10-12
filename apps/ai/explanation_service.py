@@ -31,13 +31,11 @@ Rules:
 - Keep the whole response concise -- a student will read this on a phone.
 """
 
-
 def _wrong_answer_signature(answer):
     if answer.selected_option_id:
         return f'option:{answer.selected_option_id}'
     payload = json.dumps(answer.matching_response or {}, sort_keys=True)
     return f'matching:{hashlib.sha256(payload.encode()).hexdigest()[:16]}'
-
 
 def _correct_answer_text(question):
     if question.question_type == Question.Type.MATCHING:
@@ -45,14 +43,12 @@ def _correct_answer_text(question):
     correct_option = question.options.filter(is_correct=True).first()
     return correct_option.text if correct_option else ''
 
-
 def _student_answer_text(question, answer):
     if question.question_type == Question.Type.MATCHING:
         left_by_pair = {str(p.id): p.left_text for p in question.pairs.all()}
         parts = [f'{left_by_pair.get(k, k)} -> {v}' for k, v in (answer.matching_response or {}).items()]
         return '; '.join(parts)
     return answer.selected_option.text if answer.selected_option else '(no answer given)'
-
 
 def _build_prompt(question, correct_answer_text, student_answer_text, context):
     quiz = question.quiz
@@ -66,7 +62,6 @@ def _build_prompt(question, correct_answer_text, student_answer_text, context):
         context_block=f'Additional context from the student: {context}\n' if context else '',
     )
 
-
 def _extract_json_block(text):
     """Strips a markdown code fence if the model wrapped its JSON in one
     despite instructions not to — a common real-world LLM quirk."""
@@ -76,7 +71,6 @@ def _extract_json_block(text):
         if text.rstrip().endswith('```'):
             text = text.rstrip()[:-3]
     return text.strip()
-
 
 def _parse_ai_response(text):
     try:
@@ -93,7 +87,6 @@ def _parse_ai_response(text):
         raise AIServiceResponseError(f'AI response missing required field(s): {", ".join(missing)}.')
 
     return {key: data[key].strip() for key in required}
-
 
 def request_explanation(user, student_answer_id, context=''):
     """Creates an AIExplanationRequest for a student's own wrong answer —
@@ -116,8 +109,6 @@ def request_explanation(user, student_answer_id, context=''):
     except StudentQuizAnswer.DoesNotExist:
         raise ValidationError({'student_answer': 'No such answer.'})
 
-    # Same generic message whether it doesn't exist or belongs to someone
-    # else -- never confirm another student's answer exists.
     if answer.attempt.student_id != user.id:
         raise ValidationError({'student_answer': 'No such answer.'})
     if answer.is_correct is None:
@@ -145,7 +136,6 @@ def request_explanation(user, student_answer_id, context=''):
         return request_obj
 
     return generate_and_store(request_obj)
-
 
 def generate_and_store(request_obj):
     """Runs (or re-runs, for a retry) generation for an existing request

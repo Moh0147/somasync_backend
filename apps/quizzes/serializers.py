@@ -4,7 +4,6 @@ from .models import (
     MatchingPair, Question, QuestionOption, Quiz, QuizAssignment, StudentQuizAnswer, StudentQuizAttempt,
 )
 
-
 class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
@@ -15,11 +14,7 @@ class QuizSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'status', 'created_by', 'published_at', 'created_at', 'updated_at']
         extra_kwargs = {'school': {'required': False}}
-        # See Phase 4/6 notes: the auto unique-together validator would
-        # otherwise force `school` to be required, breaking the deferred
-        # school-injection pattern.
         validators = []
-
 
 class QuestionOptionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -27,13 +22,11 @@ class QuestionOptionSerializer(serializers.ModelSerializer):
         fields = ['id', 'text', 'is_correct', 'order']
         read_only_fields = ['id']
 
-
 class MatchingPairSerializer(serializers.ModelSerializer):
     class Meta:
         model = MatchingPair
         fields = ['id', 'left_text', 'right_text', 'order']
         read_only_fields = ['id']
-
 
 class QuestionSerializer(serializers.ModelSerializer):
     options = QuestionOptionSerializer(many=True, read_only=True)
@@ -45,12 +38,7 @@ class QuestionSerializer(serializers.ModelSerializer):
             'id', 'school', 'quiz', 'question_type', 'text', 'marks', 'order',
             'explanation', 'created_by', 'options', 'pairs', 'created_at', 'updated_at',
         ]
-        # `school` and `created_by` are always derived from `quiz` (the
-        # question's tenant/ownership are never independently choosable,
-        # unlike Quiz/Lesson/Subject where a system admin must pick a
-        # school explicitly) — see QuestionViewSet.perform_create.
         read_only_fields = ['id', 'school', 'created_by', 'options', 'pairs', 'created_at', 'updated_at']
-
 
 class SafeQuestionOptionSerializer(serializers.ModelSerializer):
     """Same as QuestionOptionSerializer but omits `is_correct` — this is
@@ -63,7 +51,6 @@ class SafeQuestionOptionSerializer(serializers.ModelSerializer):
         model = QuestionOption
         fields = ['id', 'text', 'order']
 
-
 class SafeMatchingPairSerializer(serializers.ModelSerializer):
     """Left side only -- `right_text` is exactly the answer key for a
     MATCHING question (see QuizMarkingService._mark_matching_question),
@@ -72,7 +59,6 @@ class SafeMatchingPairSerializer(serializers.ModelSerializer):
     class Meta:
         model = MatchingPair
         fields = ['id', 'left_text', 'order']
-
 
 class SafeQuestionSerializer(serializers.ModelSerializer):
     """Student-facing: a question with its options/pairs but no answer
@@ -102,15 +88,11 @@ class SafeQuestionSerializer(serializers.ModelSerializer):
         random.shuffle(texts)
         return texts
 
-
 class QuizAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuizAssignment
         fields = ['id', 'quiz', 'school_class', 'assigned_by', 'assigned_at']
         read_only_fields = fields
-
-
-# --- offline quiz attempts ---
 
 class AnswerInputSerializer(serializers.Serializer):
     """Shape of one answer event, used both by the single `answer` action
@@ -121,18 +103,15 @@ class AnswerInputSerializer(serializers.Serializer):
     selected_option = serializers.IntegerField(required=False, allow_null=True)
     matching_response = serializers.DictField(required=False)
 
-
 class StartAttemptSerializer(serializers.Serializer):
     quiz = serializers.IntegerField()
     client_attempt_id = serializers.CharField(max_length=64)
-
 
 class SyncAttemptSerializer(serializers.Serializer):
     client_attempt_id = serializers.CharField(max_length=64)
     quiz = serializers.IntegerField()
     submitted = serializers.BooleanField(default=False)
     answers = AnswerInputSerializer(many=True, required=False)
-
 
 class StudentQuizAnswerSerializer(serializers.ModelSerializer):
     class Meta:
@@ -142,7 +121,6 @@ class StudentQuizAnswerSerializer(serializers.ModelSerializer):
             'is_correct', 'marks_awarded', 'answered_at',
         ]
         read_only_fields = fields
-
 
 class StudentQuizAttemptSerializer(serializers.ModelSerializer):
     answers = StudentQuizAnswerSerializer(many=True, read_only=True)

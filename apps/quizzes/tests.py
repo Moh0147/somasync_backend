@@ -15,14 +15,12 @@ from .models import (
 from .serializers import SafeQuestionSerializer
 from .services import QuizMarkingService
 
-
 def create_user(role, school=None, admin_scope=None, username=None, password='pass12345'):
     username = username or f'{role.lower()}-{school.code if school else "sys"}-{admin_scope or ""}'
     user = User(role=role, admin_scope=admin_scope, school=school, username=username)
     user.set_password(password)
     user.save()
     return user
-
 
 class QuizzesTestBase(TestCase):
     def setUp(self):
@@ -60,7 +58,6 @@ class QuizzesTestBase(TestCase):
         payload.update(overrides)
         return self.client.post('/api/quizzes/questions/', payload)
 
-
 class QuizPermissionTests(QuizzesTestBase):
     def test_teacher_can_create_quiz(self):
         self.auth('qz_teacher_a')
@@ -89,7 +86,7 @@ class QuizPermissionTests(QuizzesTestBase):
         quiz_id = self.create_quiz().data['data']['id']
         self.auth('qz_teacher_a2')
         response = self.client.patch(f'/api/quizzes/{quiz_id}/', {'title': 'Hijacked'})
-        self.assertEqual(response.status_code, 404)  # invisible to a peer teacher
+        self.assertEqual(response.status_code, 404)
 
     def test_admin_can_edit_any_teachers_quiz(self):
         self.auth('qz_teacher_a')
@@ -101,7 +98,6 @@ class QuizPermissionTests(QuizzesTestBase):
     def test_unauthenticated_cannot_access_quizzes(self):
         response = self.client.get('/api/quizzes/')
         self.assertEqual(response.status_code, 401)
-
 
 class MCQQuestionTests(QuizzesTestBase):
     def setUp(self):
@@ -141,7 +137,6 @@ class MCQQuestionTests(QuizzesTestBase):
         response = self.client.post(f'/api/quizzes/questions/{question_id}/options/', {'text': '4', 'is_correct': True})
         self.assertEqual(response.status_code, 404)
 
-
 class TrueFalseQuestionTests(QuizzesTestBase):
     def setUp(self):
         super().setUp()
@@ -164,7 +159,6 @@ class TrueFalseQuestionTests(QuizzesTestBase):
             f'/api/quizzes/questions/{self.question_id}/options/', {'text': 'Maybe', 'is_correct': False},
         )
         self.assertEqual(response.status_code, 400)
-
 
 class MatchingQuestionTests(QuizzesTestBase):
     def setUp(self):
@@ -200,7 +194,6 @@ class MatchingQuestionTests(QuizzesTestBase):
         response = self.client.delete(f'/api/quizzes/questions/{self.question_id}/pairs/', {'pair_id': pair_id})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(MatchingPair.objects.filter(id=pair_id).exists())
-
 
 class SafeQuestionSerializerTests(QuizzesTestBase):
     """SafeQuestionSerializer is the answer-hidden view used wherever a
@@ -240,7 +233,6 @@ class SafeQuestionSerializerTests(QuizzesTestBase):
         question = Question.objects.get(id=question_id)
         data = SafeQuestionSerializer(question).data
         self.assertNotIn('explanation', data)
-
 
 class QuizValidationTests(QuizzesTestBase):
     def setUp(self):
@@ -295,7 +287,6 @@ class QuizValidationTests(QuizzesTestBase):
         response = self.create_question(self.quiz_id, Question.Type.MCQ, text='New sneaky question')
         self.assertEqual(response.status_code, 400)
 
-
 class QuizPublishingAndAssignmentTests(QuizzesTestBase):
     def setUp(self):
         super().setUp()
@@ -344,8 +335,6 @@ class QuizPublishingAndAssignmentTests(QuizzesTestBase):
         self.assertEqual(questions_response.data['data']['count'], 0)
 
     def test_student_quiz_list_excludes_section_mini_quizzes(self):
-        # Mini-quizzes are exposed through lesson sections, not as normal
-        # quizzes. They have no QuizAssignment and must not be listed here.
         from apps.lessons.models import Lesson, LessonSection, SectionMiniQuiz
 
         lesson = Lesson.objects.create(
@@ -381,11 +370,10 @@ class QuizPublishingAndAssignmentTests(QuizzesTestBase):
         response = self.client.get(f'/api/quizzes/questions/{question_id}/')
         self.assertEqual(response.status_code, 404)
 
-
 class QuizAttemptTestBase(QuizzesTestBase):
     def setUp(self):
         super().setUp()
-        self.school_b = self.school_b  # already created in QuizzesTestBase
+        self.school_b = self.school_b
         self.student_a2 = create_user(User.Role.STUDENT, school=self.school_a, username='qz_student_a2')
         self.student_b = create_user(User.Role.STUDENT, school=self.school_b, username='qz_student_b')
         self.class_b = SchoolClass.objects.create(
@@ -394,7 +382,6 @@ class QuizAttemptTestBase(QuizzesTestBase):
 
         StudentClassMembership.objects.create(school_class=self.class_a, student=self.student_a)
         StudentClassMembership.objects.create(school_class=self.class_b, student=self.student_b)
-        # student_a2 is deliberately NOT enrolled in class_a.
 
         self.auth('qz_teacher_a')
         self.quiz_id = self.create_quiz().data['data']['id']
@@ -416,7 +403,6 @@ class QuizAttemptTestBase(QuizzesTestBase):
 
     def uid(self):
         return str(uuid.uuid4())
-
 
 class AttemptCreationTests(QuizAttemptTestBase):
     def test_student_can_start_attempt(self):
@@ -447,7 +433,7 @@ class AttemptCreationTests(QuizAttemptTestBase):
         self.assertEqual(response.status_code, 400)
 
     def test_cannot_start_attempt_for_unassigned_quiz(self):
-        self.auth('qz_student_a2')  # enrolled in no class at all
+        self.auth('qz_student_a2')
         response = self.client.post('/api/quizzes/attempts/start/', {'quiz': self.quiz_id, 'client_attempt_id': self.uid()})
         self.assertEqual(response.status_code, 400)
 
@@ -455,7 +441,6 @@ class AttemptCreationTests(QuizAttemptTestBase):
         self.auth('qz_student_b')
         response = self.client.post('/api/quizzes/attempts/start/', {'quiz': self.quiz_id, 'client_attempt_id': self.uid()})
         self.assertEqual(response.status_code, 400)
-
 
 class AnswerSubmissionTests(QuizAttemptTestBase):
     def setUp(self):
@@ -515,7 +500,7 @@ class AnswerSubmissionTests(QuizAttemptTestBase):
         response = self.client.post(f'/api/quizzes/attempts/{self.client_attempt_id}/answer/', {
             'client_answer_id': self.uid(), 'question': self.mcq_id, 'selected_option': self.correct_option_id,
         })
-        self.assertEqual(response.status_code, 404)  # not in this student's scoped queryset
+        self.assertEqual(response.status_code, 404)
 
     def test_answer_referencing_question_from_other_quiz_rejected(self):
         self.auth('qz_teacher_a')
@@ -533,7 +518,6 @@ class AnswerSubmissionTests(QuizAttemptTestBase):
             'client_answer_id': self.uid(), 'question': self.mcq_id, 'selected_option': self.correct_option_id,
         })
         self.assertEqual(response.status_code, 400)
-
 
 class SubmitTests(QuizAttemptTestBase):
     def setUp(self):
@@ -560,7 +544,6 @@ class SubmitTests(QuizAttemptTestBase):
         self.auth('qz_student_a2')
         response = self.client.post(f'/api/quizzes/attempts/{self.client_attempt_id}/submit/')
         self.assertEqual(response.status_code, 404)
-
 
 class OfflineSyncTests(QuizAttemptTestBase):
     def sync_payload(self, client_attempt_id, submitted=False, answers=None):
@@ -642,10 +625,9 @@ class OfflineSyncTests(QuizAttemptTestBase):
             {'client_answer_id': self.uid(), 'question': self.mcq_id, 'selected_option': self.correct_option_id},
         ])
         response = self.client.post('/api/quizzes/attempts/sync/', payload, format='json')
-        self.assertEqual(response.status_code, 200)  # existing row updated, not created
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(StudentQuizAttempt.objects.filter(client_attempt_id=client_attempt_id).count(), 1)
         self.assertEqual(response.data['data']['status'], 'SYNCED')
-
 
 class AttemptOwnershipAndVisibilityTests(QuizAttemptTestBase):
     def setUp(self):
@@ -681,7 +663,6 @@ class AttemptOwnershipAndVisibilityTests(QuizAttemptTestBase):
         self.client.credentials()
         response = self.client.get('/api/quizzes/attempts/')
         self.assertEqual(response.status_code, 401)
-
 
 class QuizMarkingServiceTests(QuizzesTestBase):
     """Direct unit tests of QuizMarkingService, built via the ORM for
@@ -770,17 +751,16 @@ class QuizMarkingServiceTests(QuizzesTestBase):
         self.assertEqual(answer.marks_awarded, Decimal('0.00'))
 
     def test_partial_matching_gives_proportional_credit(self):
-        # 2 of 4 pairs correct -> half of this question's 4 marks = 2.00
         answer = self.answer(self.matching, matching_response={
-            str(self.pair1.id): 'Dodoma',   # correct
-            str(self.pair2.id): 'Nairobi',  # correct
-            str(self.pair3.id): 'Dodoma',   # wrong
-            str(self.pair4.id): 'Nairobi',  # wrong
+            str(self.pair1.id): 'Dodoma',
+            str(self.pair2.id): 'Nairobi',
+            str(self.pair3.id): 'Dodoma',
+            str(self.pair4.id): 'Nairobi',
         })
         QuizMarkingService.mark_attempt(self.attempt)
         answer.refresh_from_db()
         self.assertEqual(answer.marks_awarded, Decimal('2.00'))
-        self.assertFalse(answer.is_correct)  # not ALL pairs correct, so not fully correct
+        self.assertFalse(answer.is_correct)
 
     def test_fully_correct_matching_marked_correct(self):
         answer = self.answer(self.matching, matching_response={
@@ -793,7 +773,7 @@ class QuizMarkingServiceTests(QuizzesTestBase):
         self.assertEqual(answer.marks_awarded, Decimal('4.00'))
 
     def test_unanswered_question_scores_zero_but_still_counts_toward_total(self):
-        self.answer(self.mcq, selected_option=self.mcq_correct)  # TF and MATCHING left unanswered
+        self.answer(self.mcq, selected_option=self.mcq_correct)
         QuizMarkingService.mark_attempt(self.attempt)
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.score, Decimal('2.00'))
@@ -803,7 +783,7 @@ class QuizMarkingServiceTests(QuizzesTestBase):
         """Defensive case: an option that doesn't belong to the question
         being answered (shouldn't happen via the API, but the service must
         not trust it blindly)."""
-        answer = self.answer(self.mcq, selected_option=self.tf_true)  # option belongs to a DIFFERENT question
+        answer = self.answer(self.mcq, selected_option=self.tf_true)
         QuizMarkingService.mark_attempt(self.attempt)
         answer.refresh_from_db()
         self.assertFalse(answer.is_correct)
@@ -829,7 +809,6 @@ class QuizMarkingServiceTests(QuizzesTestBase):
         self.assertEqual(self.attempt.total_marks, self.mcq.marks + self.tf.marks + self.matching.marks)
 
     def test_percentage_rounds_to_two_decimal_places(self):
-        # Only the True/False (1 mark) correct out of 7 total -> 14.285714...%
         self.answer(self.tf, selected_option=self.tf_true)
         QuizMarkingService.mark_attempt(self.attempt)
         self.attempt.refresh_from_db()
@@ -842,7 +821,6 @@ class QuizMarkingServiceTests(QuizzesTestBase):
         QuizMarkingService.mark_attempt(self.attempt)
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.score, first_score)
-
 
 class AutoMarkingIntegrationTests(QuizAttemptTestBase):
     """Confirms the API actually wires QuizMarkingService into submit/sync,

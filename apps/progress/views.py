@@ -10,7 +10,6 @@ from .models import LessonProgress
 from .serializers import LessonProgressSerializer, TrackProgressSerializer
 from .services import track_lesson_progress
 
-
 class LessonProgressViewSet(EnvelopeMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """/api/progress/ — a student's progress through lessons. Read
     visibility: a student sees only their own; a teacher sees progress on

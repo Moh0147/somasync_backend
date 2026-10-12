@@ -14,7 +14,6 @@ from apps.quizzes.models import StudentQuizAttempt
 from apps.quizzes.serializers import StudentQuizAttemptSerializer, SyncAttemptSerializer
 from apps.quizzes.services import sync_quiz_attempt
 
-
 def _push_quiz_attempt(user, client_id, data):
     payload = {**data, 'client_attempt_id': client_id}
     serializer = SyncAttemptSerializer(data=payload)
@@ -24,22 +23,17 @@ def _push_quiz_attempt(user, client_id, data):
         return False, StudentQuizAttemptSerializer(attempt).data, attempt.sync_error
     return True, StudentQuizAttemptSerializer(attempt).data, ''
 
-
 def _pull_quiz_attempts(user, since):
     queryset = StudentQuizAttempt.objects.filter(student=user).select_related('school', 'quiz', 'student')
     if since:
         queryset = queryset.filter(updated_at__gt=since)
     return StudentQuizAttemptSerializer(queryset, many=True).data
 
-
 def _push_lesson_progress(user, _client_id, data):
-    # lesson_progress's natural idempotency key is (student, lesson), not
-    # the sync-framework client_id, so it's unused here.
     serializer = TrackProgressSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     progress, _ = track_lesson_progress(user, serializer.validated_data)
     return True, LessonProgressSerializer(progress).data, ''
-
 
 def _pull_lesson_progress(user, since):
     from apps.progress.models import LessonProgress
@@ -48,14 +42,11 @@ def _pull_lesson_progress(user, since):
         queryset = queryset.filter(updated_at__gt=since)
     return LessonProgressSerializer(queryset, many=True).data
 
-
-# Each push handler: (user, client_id, data) -> (success: bool, result_data: dict, error: str)
 PUSH_HANDLERS = {
     'quiz_attempt': _push_quiz_attempt,
     'lesson_progress': _push_lesson_progress,
 }
 
-# Each pull handler: (user, since: datetime | None) -> list[dict]
 PULL_HANDLERS = {
     'quiz_attempt': _pull_quiz_attempts,
     'lesson_progress': _pull_lesson_progress,

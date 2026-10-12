@@ -13,35 +13,24 @@ ROLE_IT_SUPPORT = 'IT_SUPPORT'
 SCOPE_SYSTEM = 'SYSTEM'
 SCOPE_SCHOOL = 'SCHOOL'
 
-# MVP marking roles: EXAM_MARKING_MANAGER has full operational access;
-# EXAMINER can upload, OCR, AI-mark, confirm marks and submit for review.
-# SYSTEM_ADMIN is intentionally absent — it must NOT grant routine
-# marking access (see the non-negotiable rule in the RBAC plan).
-# Legacy roles (CHIEF_EXAMINER, CHECKER, DATA_ENTRY_CLERK, IT_SUPPORT)
-# are preserved in the DB but removed from active permission sets.
 MARKING_OPERATIONAL_ROLES = frozenset({
     ROLE_EXAM_MARKING_MANAGER,
     ROLE_EXAMINER,
 })
 
-# All roles that may READ marking domain resources (scripts, answers).
-# SYSTEM_ADMIN is intentionally absent — use the admin overview endpoints.
 MARKING_READ_ROLES = frozenset({
     ROLE_EXAM_MARKING_MANAGER,
     ROLE_EXAMINER,
 })
 
-# All roles that carry a school FK (non-admin school-scoped users).
 SCHOOL_SCOPED_ROLES = frozenset({
     ROLE_TEACHER, ROLE_STUDENT,
     ROLE_EXAM_MARKING_MANAGER, ROLE_CHIEF_EXAMINER, ROLE_EXAMINER,
     ROLE_CHECKER, ROLE_DATA_ENTRY_CLERK, ROLE_IT_SUPPORT,
 })
 
-
 def _authenticated(request):
     return bool(request.user and request.user.is_authenticated)
-
 
 def is_system_admin(user):
     """True only for a SYSTEM-scoped admin, who spans every school.
@@ -51,7 +40,6 @@ def is_system_admin(user):
         and user.role == ROLE_ADMIN and user.admin_scope == SCOPE_SYSTEM
     )
 
-
 def is_marking_role(user):
     """True if the user holds any operational marking role."""
     return bool(
@@ -59,19 +47,14 @@ def is_marking_role(user):
         and user.role in MARKING_OPERATIONAL_ROLES
     )
 
-
-# ── Standard role permission classes ─────────────────────────────────────────
-
 class IsAdmin(BasePermission):
     """Any ADMIN, regardless of scope (SYSTEM or SCHOOL)."""
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_ADMIN
 
-
 class IsSystemAdmin(BasePermission):
     def has_permission(self, request, view):
         return is_system_admin(request.user)
-
 
 class IsSchoolAdmin(BasePermission):
     def has_permission(self, request, view):
@@ -81,57 +64,43 @@ class IsSchoolAdmin(BasePermission):
             and request.user.admin_scope == SCOPE_SCHOOL
         )
 
-
 class IsTeacher(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_TEACHER
-
 
 class IsStudent(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_STUDENT
 
-
-# ── Marking domain permission classes ────────────────────────────────────────
-
 class IsExamMarkingManager(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_EXAM_MARKING_MANAGER
-
 
 class IsChiefExaminer(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_CHIEF_EXAMINER
 
-
 class IsExaminer(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_EXAMINER
-
 
 class IsChecker(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_CHECKER
 
-
 class IsDataEntryClerk(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_DATA_ENTRY_CLERK
 
-
 class IsITSupport(BasePermission):
     def has_permission(self, request, view):
         return _authenticated(request) and request.user.role == ROLE_IT_SUPPORT
-
 
 class IsMarkingRole(BasePermission):
     """Any user with an active MVP marking role (EXAM_MARKING_MANAGER or
     EXAMINER). Deliberately excludes SYSTEM_ADMIN."""
     def has_permission(self, request, view):
         return is_marking_role(request.user)
-
-
-# ── Object-level permission classes ──────────────────────────────────────────
 
 class IsOwnSchool(BasePermission):
     """Object-level permission for the School model itself."""
@@ -142,7 +111,6 @@ class IsOwnSchool(BasePermission):
             return True
         return obj.id == request.user.school_id
 
-
 class IsTenantObjectOwner(BasePermission):
     """Object-level permission for models with a `school` FK."""
     def has_object_permission(self, request, view, obj):
@@ -151,7 +119,6 @@ class IsTenantObjectOwner(BasePermission):
         if is_system_admin(request.user):
             return True
         return getattr(obj, 'school_id', None) == request.user.school_id
-
 
 class IsOwnerOrSchoolAdmin(BasePermission):
     """Object-level permission for content a specific user authors within
@@ -169,7 +136,6 @@ class IsOwnerOrSchoolAdmin(BasePermission):
         if request.user.role == ROLE_ADMIN and request.user.school_id == getattr(obj, 'school_id', None):
             return True
         return getattr(obj, f'{self.owner_field}_id', None) == request.user.id
-
 
 class TenantScopedQuerysetMixin:
     """Mixin for viewsets whose queryset must be scoped to the requesting

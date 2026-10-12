@@ -4,7 +4,6 @@ from rest_framework.permissions import IsAuthenticated
 from common.permissions import IsAdmin, TenantScopedQuerysetMixin, is_system_admin
 from common.utils import api_response
 
-
 class EnvelopeMixin:
     """Wraps a ModelViewSet's default list/retrieve/create/update output in
     the project's standard {success, data} response envelope, so DRF's
@@ -35,7 +34,6 @@ class EnvelopeMixin:
             message=self.success_messages.get('update'),
         )
 
-
 class TenantOwnedViewSetMixin(TenantScopedQuerysetMixin):
     """For ViewSets over models with a `school` FK, owned by a specific
     tenant (subjects, topics, classes, lessons, quizzes, ...). Combines
@@ -58,12 +56,6 @@ class TenantOwnedViewSetMixin(TenantScopedQuerysetMixin):
     def get_permissions(self):
         if self.action in ('create', 'update', 'partial_update', 'destroy'):
             return [IsAuthenticated(), IsAdmin()]
-        # Falls back to DRF's normal resolution (self.permission_classes),
-        # which for a custom @action already reflects that action's own
-        # `permission_classes=[...]` kwarg — hardcoding a return here would
-        # silently override it (caught via a failing test: a non-student
-        # could call a student-only @action because this fallback ignored
-        # its permission_classes).
         return super().get_permissions()
 
     def resolve_create_school(self, serializer):
