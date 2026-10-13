@@ -1,18 +1,3 @@
-"""Read-only reporting endpoints. No models of its own -- everything here
-aggregates data already built by every prior phase.
-
-Query discipline: every aggregate here is either (a) a single .aggregate()
-call scoped via a subquery filter (student_id__in=...), or (b) an
-.annotate() combining multiple Count()/Avg() over the SAME relation
-(safe — Django's classic multi-relation annotate fan-out bug only bites
-when combining aggregates across DIFFERENT relations in one call, which
-this file deliberately avoids by never doing that). The outer loop in
-each "list one row per X" endpoint is always bounded by a small,
-naturally-limited set (a teacher's own classes/quizzes/lessons/exams, or
-a school's own subjects/classes) — never by student/attempt count, which
-is where real N+1 risk would live.
-"""
-
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count, Q
 from rest_framework.decorators import api_view, permission_classes
@@ -74,13 +59,7 @@ def teacher_class_performance(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_student_performance(request):
-    """Student performance: one row per student across this teacher's
-    classes (optionally narrowed to one class via ?class_id=).
 
-    Grouped aggregation, not a per-student loop: caught via an empirical
-    query-count check that an earlier per-student version of this was a
-    real N+1 (3 extra queries x every student). Now it's a fixed ~5
-    queries total regardless of how many students there are."""
     class_id = request.query_params.get('class_id')
     class_ids = SchoolClass.objects.filter(teacher_memberships__teacher=request.user).values_list('id', flat=True)
     if class_id:
@@ -126,7 +105,7 @@ def teacher_student_performance(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_quiz_performance(request):
-    """Quiz performance: one row per quiz this teacher created."""
+
     quizzes = Quiz.objects.filter(created_by=request.user)
     results = []
     for quiz in quizzes:
@@ -142,8 +121,7 @@ def teacher_quiz_performance(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_question_performance(request, quiz_id):
-    """Question performance: one row per question in ONE of this
-    teacher's own quizzes — which questions students most often miss."""
+
     try:
         quiz = Quiz.objects.get(id=quiz_id, created_by=request.user)
     except Quiz.DoesNotExist:
@@ -168,7 +146,7 @@ def teacher_question_performance(request, quiz_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
 def teacher_lesson_completion(request):
-    """Lesson completion: one row per lesson this teacher created."""
+
     lessons = Lesson.objects.filter(created_by=request.user).annotate(
         started_count=Count('progress_records'),
         completed_count=Count('progress_records', filter=Q(progress_records__completed=True)),
@@ -205,7 +183,7 @@ def teacher_exam_performance(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
 def school_overview(request):
-    """School-wide performance summary for the admin's own school."""
+
     school = request.user.school
     student_ids = User.objects.filter(school=school, role=User.Role.STUDENT).values_list('id', flat=True)
 
@@ -224,15 +202,13 @@ def school_overview(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
 def school_class_performance(request):
-    """Class performance: one row per class in the admin's own school
-    (broader than a single teacher's view — every class, any teacher)."""
+
     classes = SchoolClass.objects.filter(school=request.user.school)
     return api_response(data=[_class_summary(c) for c in classes])
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSchoolAdmin])
 def school_subject_performance(request):
-    """Subject performance: one row per subject in the admin's own school."""
 
     subjects = Subject.objects.filter(school=request.user.school)
     results = []
@@ -268,7 +244,7 @@ def system_schools(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_users(request):
-    """System-wide user counts by role and active status."""
+
     by_role = User.objects.values('role').annotate(count=Count('id')).order_by('role')
     return api_response(data={
         'total_users': User.objects.count(),
@@ -279,11 +255,7 @@ def system_users(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_user_directory(request):
-    """Read-only directory of school-owned accounts for system admins.
 
-    System admin accounts are intentionally excluded from this directory;
-    they are privileged platform operators, not school-managed accounts.
-    """
     users = User.objects.select_related('school').exclude(
         role=User.Role.ADMIN, admin_scope=User.AdminScope.SYSTEM,
     ).order_by('school__name', 'role', 'last_name', 'first_name', 'username')
@@ -305,7 +277,7 @@ def system_user_directory(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def system_usage(request):
-    """High-level system-wide activity counts."""
+
     return api_response(data={
         'school_count': School.objects.count(),
         'active_school_count': School.objects.filter(is_active=True).count(),

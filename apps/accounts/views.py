@@ -20,8 +20,6 @@ from .serializers import (
 User = get_user_model()
 
 class LoginView(TokenObtainPairView):
-    """POST /api/auth/login/ — issues an access/refresh token pair plus a
-    snapshot of the authenticated user's profile."""
 
     serializer_class = CustomTokenObtainPairSerializer
     throttle_scope = 'login'
@@ -40,7 +38,6 @@ class LoginView(TokenObtainPairView):
         return api_response(data=serializer.validated_data, message='Login successful')
 
 class TokenRefreshView(BaseTokenRefreshView):
-    """POST /api/auth/refresh/ — exchanges a refresh token for a new access token."""
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -51,7 +48,6 @@ class TokenRefreshView(BaseTokenRefreshView):
         return api_response(data=serializer.validated_data, message='Token refreshed')
 
 class MeView(APIView):
-    """GET /api/auth/me/ — the current authenticated user's profile."""
 
     permission_classes = [IsAuthenticated]
 
@@ -59,12 +55,6 @@ class MeView(APIView):
         return api_response(data=UserSerializer(request.user).data)
 
 class LogoutView(APIView):
-    """POST /api/auth/logout/ — blacklists the given refresh token so it
-    can never be exchanged for a new access token again. Without this, a
-    "logged out" refresh token would stay valid for the rest of its
-    lifetime (JWT_REFRESH_DAYS) even after the user logs out client-side —
-    this closes that window immediately. Does not touch any still-live
-    access token, which simply expires on its own short lifetime."""
 
     permission_classes = [IsAuthenticated]
 
@@ -90,8 +80,7 @@ def _user_queryset():
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def user_list_create(request):
-    """GET  /api/admin/users/ — list all non-system-admin accounts.
-    POST /api/admin/users/ — create a new account (any role except SYSTEM_ADMIN)."""
+
     if request.method == 'GET':
         users = _user_queryset()
         return api_response(data=UserSerializer(users, many=True).data)
@@ -120,8 +109,7 @@ def user_list_create(request):
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated, IsSystemAdmin])
 def user_detail(request, pk):
-    """GET   /api/admin/users/{pk}/ — retrieve a single user.
-    PATCH /api/admin/users/{pk}/ — update role, school, active status, or name fields."""
+ 
     try:
         user = _user_queryset().get(pk=pk)
     except User.DoesNotExist:
@@ -152,9 +140,7 @@ def user_detail(request, pk):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def school_teachers(request):
-    """GET /api/auth/school-teachers/ — list teachers at the calling
-    EXAM_MARKING_MANAGER's school, with their secondary_role shown so
-    the manager can see who is already an Examiner."""
+
     user = request.user
     if user.role != 'EXAM_MARKING_MANAGER' and not is_system_admin(user):
         from rest_framework.exceptions import PermissionDenied
@@ -179,8 +165,7 @@ def school_teachers(request):
 @api_view(['POST', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def assign_examiner_role(request, pk):
-    """POST   /api/auth/school-teachers/{pk}/examiner/ — grant secondary_role=EXAMINER.
-    DELETE /api/auth/school-teachers/{pk}/examiner/ — revoke secondary_role."""
+
     caller = request.user
     if caller.role != 'EXAM_MARKING_MANAGER' and not is_system_admin(caller):
         from rest_framework.exceptions import PermissionDenied

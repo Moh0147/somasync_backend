@@ -15,10 +15,6 @@ from .serializers import AssignMemberSerializer, JoinClassSerializer, SchoolClas
 User = get_user_model()
 
 class SchoolClassViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
-    """/api/classes/ — school-owned. Admins (system/school) manage class
-    definitions; any authenticated user in the same school can view them.
-    Membership is managed via the nested `teachers` / `students` actions
-    (admin-only), plus student self-join via class_code (`join`)."""
 
     queryset = SchoolClass.objects.select_related('school', 'class_level')
     serializer_class = SchoolClassSerializer

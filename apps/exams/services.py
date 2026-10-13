@@ -3,22 +3,10 @@ from django.utils import timezone
 from .models import ExamQuestion
 
 class ExamMarkingService:
-    """Deterministic marking for OBJECTIVE exam questions. SUBJECTIVE
-    questions are prepared here (the ai_marks_awarded/ai_feedback slots
-    exist on StudentExamAnswer) but never marked by AI in this phase —
-    that's Phase 17. This service never publishes or finalizes anything;
-    it only populates marking data. Status transitions (MARKING → REVIEW →
-    FINALIZED → RESULTS_PUBLISHED) remain explicit, teacher-controlled
-    actions elsewhere.
-    """
 
     @classmethod
     def mark_answer(cls, answer):
-        """Deterministically marks ONE objective answer in place and
-        saves it. No-ops (returns unchanged, unsaved) for a SUBJECTIVE
-        question, or an OBJECTIVE one with no `recorded_answer` yet —
-        those are left for a teacher (or, for subjective, Phase 17's AI
-        suggestion + teacher review)."""
+
         question = answer.exam_question
         if question.question_type != ExamQuestion.Type.OBJECTIVE:
             return answer

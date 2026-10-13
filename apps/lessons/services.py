@@ -10,11 +10,7 @@ from apps.quizzes.services import QuizMarkingService, save_quiz_answer
 from .models import StudentSectionProgress
 
 def section_statuses_for_student(lesson, student):
-    """Ordered [{section, status, best_score, attempts}, ...] for one
-    student's view of one lesson's sections. Side-effect-free (a GET must
-    never write) -- a LOCKED/AVAILABLE section with no progress row yet is
-    purely computed here, not persisted, until the student actually earns
-    it via submit_section_quiz()."""
+
     sections = list(lesson.sections.select_related('mini_quiz').order_by('order'))
     if not sections:
         return []

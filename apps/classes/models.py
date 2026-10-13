@@ -10,11 +10,6 @@ def generate_class_code():
     return get_random_string(8, allowed_chars=string.ascii_uppercase + string.digits)
 
 class SchoolClass(models.Model):
-    """A concrete class/stream at a school for a given academic year, e.g.
-    'Form II Blue' for 2026. `class_code` is a random, globally-unique
-    token students use to self-join — never a predictable, human-chosen
-    string, and never reused across schools (so a code alone can't be
-    mistaken for one belonging to a different school)."""
 
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='classes')
     name = models.CharField(max_length=100)

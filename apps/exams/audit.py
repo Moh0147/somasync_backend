@@ -1,8 +1,3 @@
-"""Marking audit log utilities.
-
-All functions are best-effort — they never raise, so an audit write
-failure can never block the primary marking action.
-"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -25,7 +20,7 @@ def log_marking_action(
     exam: Exam | None = None,
     detail: dict | None = None,
 ) -> None:
-    """Append a MarkingAuditLog entry. Never raises."""
+
     try:
         from .models import MarkingAuditLog
         user = request.user

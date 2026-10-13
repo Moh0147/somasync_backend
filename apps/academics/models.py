@@ -2,10 +2,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 class ClassLevel(models.Model):
-    """A national curriculum level (Form I, Form II, ...). This is shared
-    reference data, NOT school-scoped — Form I means the same thing at every
-    school. Extensible later (e.g. Form V/VI for A-Level) by a system admin;
-    never hard-coded as claims about official TIE/NECTA structure."""
 
     name = models.CharField(max_length=50, unique=True)
     code = models.CharField(max_length=20, unique=True)
@@ -40,10 +36,6 @@ class Subject(models.Model):
         return f'{self.name} ({self.school.code})'
 
 class Topic(models.Model):
-    """A topic belongs to a (Subject, ClassLevel) pair: e.g. "Algebra" under
-    Mathematics / Form II. `school` is denormalized from `subject.school`
-    for direct, efficient tenant-scoped queryset filtering — kept in sync
-    and validated at save time (see TopicViewSet)."""
 
     school = models.ForeignKey('schools.School', on_delete=models.CASCADE, related_name='topics')
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name='topics')

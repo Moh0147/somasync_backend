@@ -1,14 +1,3 @@
-"""
-Generates a printable mark sheet PDF for a completed exam.
-
-Layout: A3 landscape (or A4 landscape when few questions).
-  - One row per candidate (sorted by candidate_number).
-  - One column per question (Q1 … Qn), plus Total and %.
-  - Footer: count, mean, highest, lowest.
-
-Dependencies already in requirements.txt: PyMuPDF (fitz).
-"""
-
 import io
 from decimal import Decimal
 

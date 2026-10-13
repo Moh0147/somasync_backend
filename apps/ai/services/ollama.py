@@ -6,9 +6,6 @@ from apps.ai.exceptions import AIServiceResponseError, AIServiceUnavailableError
 from .base import AIService, AIServiceResponse
 
 class OllamaAIService(AIService):
-    """Talks to a local Ollama server's /api/generate endpoint. Configured
-    entirely via settings (OLLAMA_BASE_URL, OLLAMA_MODEL,
-    OLLAMA_TIMEOUT_SECONDS), overridable per-instance for tests."""
 
     def __init__(self, base_url=None, model=None, timeout=None):
         self.base_url = (base_url or settings.OLLAMA_BASE_URL).rstrip('/')

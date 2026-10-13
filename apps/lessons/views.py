@@ -29,11 +29,6 @@ from .serializers import (
 from .services import ensure_section_accessible, section_statuses_for_student, submit_section_quiz
 
 class LessonViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
-    """/api/lessons/ — school-owned. A teacher authors their own lessons;
-    school/system admins have full oversight (edit or moderate anyone's).
-    Visibility: admins see everything in their school; a teacher sees every
-    PUBLISHED lesson plus their own regardless of status; a student only
-    ever sees PUBLISHED lessons."""
 
     queryset = Lesson.objects.select_related(
         'school', 'subject', 'class_level', 'topic', 'learning_objective', 'created_by',

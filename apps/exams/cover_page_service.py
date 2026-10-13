@@ -1,17 +1,3 @@
-"""
-Generates a printable PDF of candidate cover pages for a given exam.
-One page per candidate — each page carries the school name, exam details,
-candidate number (large, for easy identification when scanning), the
-student's display name, and a QR code encoding the candidate number.
-
-The QR code is intentionally minimal: it encodes only the candidate_number
-string (e.g. "F2A-003"). The frontend camera scanner reads this value,
-looks it up in the already-loaded candidates list, and matches automatically
-without any network round-trip.
-
-Dependencies already in requirements.txt: PyMuPDF (fitz), Pillow, qrcode.
-"""
-
 import io
 
 import fitz
@@ -44,18 +30,6 @@ def _ct(page: fitz.Page, y: float, text: str, fontsize: float,
     page.insert_text((x, y), text, fontsize=fontsize, fontname=fontname, color=color)
 
 def generate_cover_pages(exam, candidates) -> bytes:
-    """Return a multi-page PDF (bytes) with one cover page per candidate.
-
-    Parameters
-    ----------
-    exam:
-        An ``Exam`` instance with ``title``, ``school`` (→ ``name``/``code``),
-        ``subject`` (→ ``name``), ``class_level`` (→ ``name``), ``exam_date``,
-        ``academic_year``, ``total_marks``.
-    candidates:
-        Iterable of ``ExamCandidate`` instances, each with ``candidate_number``
-        and ``student`` (→ ``get_full_name()`` / ``username``).
-    """
 
     doc = fitz.open()
 

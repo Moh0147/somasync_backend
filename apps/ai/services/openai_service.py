@@ -5,9 +5,6 @@ from apps.ai.exceptions import AIServiceResponseError, AIServiceUnavailableError
 from .base import AIService, AIServiceResponse
 
 class OpenAIService(AIService):
-    """Talks to OpenAI's chat completions endpoint (gpt-4o-mini by default).
-    Used as the preferred AIService when OPENAI_API_KEY is set in settings —
-    falls back to OllamaAIService when the key is absent or the call fails."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key or getattr(settings, 'OPENAI_API_KEY', '')

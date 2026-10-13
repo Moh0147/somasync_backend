@@ -42,11 +42,6 @@ from .serializers import (
 User = get_user_model()
 
 class ExamViewSet(EnvelopeMixin, TenantOwnedViewSetMixin, viewsets.ModelViewSet):
-    """/api/exams/ — school-owned. A teacher authors their own exams;
-    school/system admins have full oversight. Authoring-only: exams are
-    administered on paper, so there's no student-facing visibility here
-    the way Quiz has (SomaSync assists marking a physical exam in later
-    phases, it never replaces the sitting itself)."""
 
     queryset = Exam.objects.select_related('school', 'subject', 'class_level', 'created_by')
     serializer_class = ExamSerializer

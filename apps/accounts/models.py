@@ -3,13 +3,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 class UserManager(DjangoUserManager):
-    """Django's default create_superuser() has no idea about `role`/
-    `admin_scope`/`school` -- it would leave role='' (no default), which
-    violates the school_required_unless_system_admin CHECK constraint on
-    every save. A Django superuser IS this project's system admin (the
-    only role that legitimately spans every school), so createsuperuser
-    should just produce one directly rather than failing or requiring the
-    operator to know these three fields exist."""
 
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         extra_fields.setdefault('role', User.Role.ADMIN)
@@ -17,13 +10,6 @@ class UserManager(DjangoUserManager):
         return super().create_superuser(username, email, password, **extra_fields)
 
 class User(AbstractUser):
-    """SomaSync's custom user. Exactly three roles exist — ADMIN, TEACHER,
-    STUDENT — never separate system-admin/school-admin roles. An ADMIN's
-    scope (SYSTEM vs SCHOOL) is tracked separately via `admin_scope`.
-
-    `school` is the tenant boundary: NULL for a system admin (who spans all
-    schools), required for everyone else (school admin, teacher, student).
-    """
 
     class Role(models.TextChoices):
         ADMIN = 'ADMIN', 'Admin'
